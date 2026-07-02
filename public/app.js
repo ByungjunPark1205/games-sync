@@ -23,6 +23,7 @@ const elements = {
   notificationsView: $("#notificationsView"),
   gateForm: $("#gateForm"),
   loginForm: $("#loginForm"),
+  backToCodeButton: $("#backToCodeButton"),
   eventCode: $("#eventCode"),
   nickname: $("#nickname"),
   affiliation: $("#affiliation"),
@@ -97,6 +98,19 @@ function setView(viewName) {
   elements.gateView.classList.toggle("hidden", viewName !== "gate");
   elements.loginView.classList.toggle("hidden", viewName !== "login");
   elements.homeView.classList.toggle("hidden", viewName !== "home");
+}
+
+function returnToGate() {
+  sessionStorage.removeItem("gamesSyncCode");
+  state.code = "";
+  state.user = null;
+  state.room = null;
+  state.people = [];
+  state.matches = [];
+  state.stats = null;
+  elements.eventCode.value = "";
+  setView("gate");
+  showToast("입장 코드를 다시 입력할 수 있어요.");
 }
 
 function updateAffiliationInput() {
@@ -307,6 +321,7 @@ async function loadPeople() {
 }
 
 elements.affiliation.addEventListener("change", updateAffiliationInput);
+elements.backToCodeButton.addEventListener("click", returnToGate);
 
 elements.gateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
