@@ -820,6 +820,45 @@ select:focus {
   background: rgba(15, 27, 51, 0.38);
 }
 
+.pending-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.pending-panel h2 {
+  margin: 0;
+  font-size: 1.42rem;
+}
+
+.privacy-note {
+  margin: 10px 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(91, 156, 255, 0.28);
+  border-radius: 14px;
+  background: rgba(91, 156, 255, 0.08);
+  color: rgba(232, 236, 243, 0.86);
+}
+
+.privacy-note strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--cyan);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.privacy-note p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.signal-privacy {
+  margin-top: -4px;
+  margin-bottom: 12px;
+}
+
 .bottom-nav {
   position: fixed;
   right: 14px;
@@ -1119,8 +1158,29 @@ dialog::backdrop {
   background: linear-gradient(145deg, rgba(15, 27, 51, 0.92), rgba(5, 10, 20, 0.9));
 }
 
+.admin-user-card.pending-user {
+  border-color: rgba(95, 213, 154, 0.54);
+  box-shadow: 0 0 22px rgba(95, 213, 154, 0.14);
+}
+
 .admin-user-card h3 {
   margin: 0 0 6px;
+}
+
+.approval-status {
+  display: inline-flex;
+  width: fit-content;
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(95, 213, 154, 0.12);
+  color: var(--green);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.approve-button {
+  min-height: 42px;
 }
 
 .admin-user-meta {
@@ -1155,19 +1215,21 @@ dialog::backdrop {
 
 .toast {
   position: fixed;
-  right: 16px;
-  bottom: max(92px, env(safe-area-inset-bottom));
-  left: 16px;
+  top: 50%;
+  left: 50%;
   z-index: 10;
-  width: min(calc(100% - 32px), 398px);
+  width: min(calc(100% - 56px), 360px);
   margin: 0 auto;
   padding: 14px 16px;
   border: 1px solid rgba(91, 156, 255, 0.42);
   border-radius: 14px;
-  background: var(--off-white);
+  background: rgba(232, 236, 243, 0.78);
   color: var(--deep-navy);
-  box-shadow: var(--shadow);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
   font-weight: 850;
+  text-align: center;
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(10px);
 }
 
 .hidden {

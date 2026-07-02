@@ -11,11 +11,14 @@ const state = {
   section: "home"
 };
 
+let approvalTimer = null;
+
 const $ = (selector) => document.querySelector(selector);
 
 const elements = {
   gateView: $("#gateView"),
   loginView: $("#loginView"),
+  pendingView: $("#pendingView"),
   homeView: $("#homeView"),
   profileView: $("#profileView"),
   homeContent: $("#homeContent"),
@@ -23,6 +26,8 @@ const elements = {
   gateForm: $("#gateForm"),
   loginForm: $("#loginForm"),
   backToCodeButton: $("#backToCodeButton"),
+  pendingBackToCodeButton: $("#pendingBackToCodeButton"),
+  pendingRefreshButton: $("#pendingRefreshButton"),
   roomBackToCodeButton: $("#roomBackToCodeButton"),
   eventCode: $("#eventCode"),
   nickname: $("#nickname"),
@@ -105,7 +110,9 @@ async function request(path, options = {}) {
   });
   const data = await response.json();
   if (!response.ok) {
-    throw new Error(data.error || data.message || "요청을 처리하지 못했어요.");
+    const error = new Error(data.error || data.message || "요청을 처리하지 못했어요.");
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
@@ -113,7 +120,40 @@ async function request(path, options = {}) {
 function setView(viewName) {
   elements.gateView.classList.toggle("hidden", viewName !== "gate");
   elements.loginView.classList.toggle("hidden", viewName !== "login");
+  elements.pendingView.classList.toggle("hidden", viewName !== "pending");
   elements.homeView.classList.toggle("hidden", viewName !== "home");
+  if (viewName !== "pending") {
+    window.clearInterval(approvalTimer);
+    approvalTimer = null;
+  }
+}
+
+async function checkApprovalStatus({ silent = false } = {}) {
+  if (!state.code || !state.user?.id) return;
+  try {
+    await loadPeople();
+    state.user.status = "approved";
+    saveCurrentUser();
+    setView("home");
+    setSection("home");
+    showToast("승인이 완료됐어요. SIGNAL을 시작할 수 있어요.");
+  } catch (error) {
+    if (error.status === 403) {
+      if (!silent) showToast("관리자 승인을 받는중입니다.");
+      setView("pending");
+      return;
+    }
+    if (!silent) showToast(error.message);
+  }
+}
+
+function showPendingApproval() {
+  setView("pending");
+  showToast("관리자 승인을 받는중입니다.");
+  window.clearInterval(approvalTimer);
+  approvalTimer = window.setInterval(() => {
+    checkApprovalStatus({ silent: true });
+  }, 5000);
 }
 
 function returnToGate() {
@@ -344,6 +384,8 @@ async function loadPeople() {
 
 elements.affiliation.addEventListener("change", updateAffiliationInput);
 elements.backToCodeButton.addEventListener("click", returnToGate);
+elements.pendingBackToCodeButton.addEventListener("click", returnToGate);
+elements.pendingRefreshButton.addEventListener("click", () => checkApprovalStatus());
 elements.roomBackToCodeButton.addEventListener("click", returnToGate);
 
 elements.gateForm.addEventListener("submit", async (event) => {
@@ -364,8 +406,12 @@ elements.gateForm.addEventListener("submit", async (event) => {
     if (state.user?.id) {
       try {
         await loadPeople();
-      } catch {
-        fallbackToLogin();
+      } catch (error) {
+        if (error.status === 403 || state.user.status === "pending") {
+          showPendingApproval();
+        } else {
+          fallbackToLogin();
+        }
       }
     } else {
       fillLoginFormFromUser(state.user || {});
@@ -403,6 +449,10 @@ elements.loginForm.addEventListener("submit", async (event) => {
     state.matches = data.matches;
     state.stats = data.stats;
     saveCurrentUser();
+    if (data.pending || state.user.status === "pending") {
+      showPendingApproval();
+      return;
+    }
     showToast(`${state.user.nickname}님, Games Sync에 입장했어요.`);
     setView("home");
     setSection("home");
@@ -513,8 +563,12 @@ async function boot() {
   setSection("home");
   try {
     await loadPeople();
-  } catch {
-    fallbackToLogin();
+  } catch (error) {
+    if (error.status === 403 || state.user.status === "pending") {
+      showPendingApproval();
+    } else {
+      fallbackToLogin();
+    }
   }
 }
 

@@ -74,6 +74,18 @@
         </form>
       </section>
 
+      <section class="panel hidden pending-panel" id="pendingView" aria-labelledby="pending-title">
+        <button class="back-button" id="pendingBackToCodeButton" type="button">입장 코드 다시 입력</button>
+        <p class="eyebrow">Approval</p>
+        <h2 id="pending-title">관리자 승인을 받는중입니다.</h2>
+        <p class="hint">승인이 완료되면 SIGNAL을 주고받을 수 있어요. 이 화면은 자동으로 확인됩니다.</p>
+        <div class="privacy-note">
+          <strong>Privacy</strong>
+          <p>멤버들간의 SIGNAL 기록과 연락처 데이터는 로컬 DB에 AES-256-GCM 방식으로 암호화되어 저장됩니다. 관리자 화면에는 서로의 SIGNAL 내역과 연락처가 노출되지 않습니다.</p>
+        </div>
+        <button class="ghost-button" id="pendingRefreshButton" type="button">승인 상태 확인</button>
+      </section>
+
       <section class="hidden home-screen" id="homeView" aria-labelledby="home-title">
         <button class="back-button room-back-button" id="roomBackToCodeButton" type="button">입장 코드 다시 입력</button>
 
@@ -113,6 +125,11 @@
               <h2 id="home-title">SIGNAL 보내기</h2>
             </div>
             <button class="ghost-button refresh-button" id="refreshButton" type="button">새로고침</button>
+          </div>
+
+          <div class="privacy-note signal-privacy">
+            <strong>Encrypted Signals</strong>
+            <p>멤버들간의 SIGNAL 내역은 관리자 화면과 웹페이지 개발자 화면에 공개되지 않습니다. 데이터는 로컬 DB에 AES-256-GCM 방식으로 암호화되어 저장됩니다.</p>
           </div>
 
           <section class="stats-grid" id="statsPanel" aria-label="SIGNAL 현황"></section>

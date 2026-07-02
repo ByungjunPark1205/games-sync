@@ -9,8 +9,10 @@ services:
         value: 24
       - key: ADMIN_KEY
         sync: false
-      - key: STORE_PATH
-        value: /var/data/store.json
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+      - key: DATABASE_PATH
+        value: /var/data/games-sync.localdb
     disk:
       name: games-sync-data
       mountPath: /var/data

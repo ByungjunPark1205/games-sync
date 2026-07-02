@@ -36,12 +36,17 @@ Admins can also adjust the per-user limits:
 
 ## Data
 
-Event data is stored in `data/store.json`.
+Event data is stored in an encrypted local database file:
+
+- Default database path: `data/games-sync.localdb`
+- Default local key path: `data/encryption.key`
+- Recommended production secret: set `DATA_ENCRYPTION_KEY`
 
 - User passwords are stored as salted hashes.
-- Contact information is shown after a SYNC.
+- Contact information is encrypted at rest and shown only after a SYNC or received `OPEN SIGNAL`.
 - `OPEN SIGNAL` reveals the sender's contact and optional note immediately.
-- Keep `data/store.json` private because it contains participant contact details.
+- Keep the encryption key private. If the key is lost, the encrypted database cannot be recovered.
+- Existing `data/store.json` data is migrated into the encrypted database on first run.
 
 ## Deploy
 
@@ -49,7 +54,7 @@ This app needs a Node web service because it has API routes and stores event dat
 
 ### GitHub
 
-Do not commit `data/store.json`; it contains participant contact details and signal history. The file is ignored by `.gitignore`.
+Do not commit anything under `data/`; it can contain encrypted event data and local encryption keys. The folder contents are ignored by `.gitignore`.
 
 ### Render
 
@@ -60,7 +65,8 @@ Recommended settings:
 - Build Command: `npm install`
 - Start Command: `npm start`
 - Environment variable `ADMIN_KEY`: set this to a private admin password
-- Environment variable `STORE_PATH`: `/var/data/store.json`
+- Environment variable `DATA_ENCRYPTION_KEY`: set this to a long private secret
+- Environment variable `DATABASE_PATH`: `/var/data/games-sync.localdb`
 - Persistent disk mount path: `/var/data`
 
 Render services use an ephemeral filesystem by default, so a persistent disk is recommended for real events.

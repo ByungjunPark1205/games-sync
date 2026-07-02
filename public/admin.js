@@ -91,15 +91,26 @@ function renderUsers() {
     return;
   }
 
-  elements.adminUserList.innerHTML = state.users
+  const sortedUsers = [...state.users].sort((a, b) => {
+    if (a.status !== b.status) return a.status === "pending" ? -1 : 1;
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+
+  elements.adminUserList.innerHTML = sortedUsers
     .map(
       (user) => `
-        <article class="admin-user-card" data-user="${user.id}">
+        <article class="admin-user-card ${user.status === "pending" ? "pending-user" : ""}" data-user="${user.id}">
           <div>
             <h3>${escapeHtml(user.nickname)}</h3>
             <p class="affiliation-chip">${escapeHtml(user.affiliationLabel)}</p>
+            <p class="approval-status">${user.status === "pending" ? "승인 대기" : "승인됨"}</p>
             <p class="admin-user-meta">SIGNAL ${user.signalRemaining}/${user.signalLimit} · OPEN ${user.openSignalRemaining}/${user.openSignalLimit} · 회수 ${user.revokeRemaining}/${user.revokeLimit} · 받은 SIGNAL ${user.receivedCount}</p>
           </div>
+          ${
+            user.status === "pending"
+              ? `<button class="primary-button approve-button" type="button" data-approve="${user.id}">입장 승인</button>`
+              : ""
+          }
           <form class="grant-form">
             <label>
               <span>추가 SIGNAL</span>
@@ -213,6 +224,26 @@ elements.adminRefresh.addEventListener("click", async () => {
     await loadDashboard();
     showToast("새로고침했어요.");
   } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.adminUserList.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-approve]");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await adminRequest("/api/admin/users/approve", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode,
+        userId: button.dataset.approve
+      })
+    });
+    showToast("입장을 승인했어요.");
+    await loadDashboard();
+  } catch (error) {
+    button.disabled = false;
     showToast(error.message);
   }
 });

@@ -6,11 +6,17 @@ const crypto = require("crypto");
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const ADMIN_KEY = process.env.ADMIN_KEY || "games-admin";
-const STORE_PATH = process.env.STORE_PATH || path.join(__dirname, "data", "store.json");
+const DATABASE_PATH =
+  process.env.DATABASE_PATH || process.env.STORE_PATH || path.join(__dirname, "data", "games-sync.localdb");
+const LEGACY_STORE_PATH = process.env.LEGACY_STORE_PATH || path.join(__dirname, "data", "store.json");
+const DATA_KEY_PATH = process.env.DATA_KEY_PATH || path.join(__dirname, "data", "encryption.key");
 const PUBLIC_DIR = path.join(__dirname, "public");
+const DATABASE_ALGORITHM = "aes-256-gcm";
 
 const SIGNAL = "signal";
 const OPEN_SIGNAL = "open";
+const USER_STATUS_PENDING = "pending";
+const USER_STATUS_APPROVED = "approved";
 const AFFILIATIONS = new Set(["Games", "동물원", "수녀원"]);
 
 const MIME_TYPES = {
@@ -104,6 +110,7 @@ function normalizeUser(user) {
   user.extraOpenSignalLimit = positiveInt(user.extraOpenSignalLimit, 0);
   user.extraRevokeLimit = positiveInt(user.extraRevokeLimit, 0);
   user.revokesUsed = positiveInt(user.revokesUsed, 0);
+  user.status = user.status === USER_STATUS_PENDING ? USER_STATUS_PENDING : USER_STATUS_APPROVED;
   user.affiliation = AFFILIATIONS.has(user.affiliation) ? user.affiliation : "";
   user.affiliationDetail = cleanText(user.affiliationDetail, 80);
   return user;
@@ -172,21 +179,140 @@ function normalizeStore(store) {
   return next;
 }
 
-async function readStore() {
+let cachedDataKey = null;
+
+function decodeConfiguredKey(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  if (/^[a-f0-9]{64}$/i.test(text)) {
+    return Buffer.from(text, "hex");
+  }
+
   try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
-    return normalizeStore(JSON.parse(raw));
+    const base64Key = Buffer.from(text, "base64");
+    if (base64Key.length === 32) return base64Key;
+  } catch {
+    // Fall through to passphrase hashing.
+  }
+
+  return crypto.createHash("sha256").update(text).digest();
+}
+
+async function dataKey() {
+  if (cachedDataKey) return cachedDataKey;
+
+  const configuredKey = decodeConfiguredKey(
+    process.env.DATA_ENCRYPTION_KEY || process.env.DB_ENCRYPTION_KEY
+  );
+  if (configuredKey) {
+    cachedDataKey = configuredKey;
+    return cachedDataKey;
+  }
+
+  try {
+    const savedKey = await fs.readFile(DATA_KEY_PATH, "utf8");
+    cachedDataKey = decodeConfiguredKey(savedKey);
+    if (cachedDataKey) return cachedDataKey;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    const store = normalizeStore(DEFAULT_STORE);
-    await writeStore(store);
-    return store;
+  }
+
+  cachedDataKey = crypto.randomBytes(32);
+  await fs.mkdir(path.dirname(DATA_KEY_PATH), { recursive: true });
+  await fs.writeFile(DATA_KEY_PATH, cachedDataKey.toString("hex"), {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  return cachedDataKey;
+}
+
+function isEncryptedDatabase(payload) {
+  return (
+    payload &&
+    payload.encrypted === true &&
+    payload.algorithm === DATABASE_ALGORITHM &&
+    payload.iv &&
+    payload.tag &&
+    payload.ciphertext
+  );
+}
+
+async function encryptStorePayload(store) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv(DATABASE_ALGORITHM, await dataKey(), iv);
+  const plaintext = JSON.stringify(normalizeStore(store));
+  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return {
+    version: 1,
+    encrypted: true,
+    algorithm: DATABASE_ALGORITHM,
+    iv: iv.toString("base64"),
+    tag: tag.toString("base64"),
+    ciphertext: ciphertext.toString("base64"),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function decryptStorePayload(payload) {
+  try {
+    const decipher = crypto.createDecipheriv(
+      DATABASE_ALGORITHM,
+      await dataKey(),
+      Buffer.from(payload.iv, "base64")
+    );
+    decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(payload.ciphertext, "base64")),
+      decipher.final()
+    ]).toString("utf8");
+    return normalizeStore(JSON.parse(plaintext));
+  } catch (error) {
+    throw new Error("Encrypted database could not be opened. Check DATA_ENCRYPTION_KEY.");
   }
 }
 
+async function readStoreFile(filePath) {
+  const raw = await fs.readFile(filePath, "utf8");
+  const payload = JSON.parse(raw);
+  if (isEncryptedDatabase(payload)) {
+    return { store: await decryptStorePayload(payload), encrypted: true };
+  }
+  return { store: normalizeStore(payload), encrypted: false };
+}
+
+async function readStore() {
+  try {
+    const result = await readStoreFile(DATABASE_PATH);
+    if (!result.encrypted) {
+      await writeStore(result.store);
+    }
+    return result.store;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+
+  if (path.resolve(LEGACY_STORE_PATH) !== path.resolve(DATABASE_PATH)) {
+    try {
+      const result = await readStoreFile(LEGACY_STORE_PATH);
+      await writeStore(result.store);
+      return result.store;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
+  const store = normalizeStore(DEFAULT_STORE);
+  await writeStore(store);
+  return store;
+}
+
 async function writeStore(store) {
-  await fs.mkdir(path.dirname(STORE_PATH), { recursive: true });
-  await fs.writeFile(STORE_PATH, JSON.stringify(normalizeStore(store), null, 2), "utf8");
+  await fs.mkdir(path.dirname(DATABASE_PATH), { recursive: true });
+  const encryptedPayload = await encryptStorePayload(store);
+  await fs.writeFile(DATABASE_PATH, JSON.stringify(encryptedPayload, null, 2), "utf8");
 }
 
 function sendJson(res, status, payload) {
@@ -232,6 +358,7 @@ function publicUser(user) {
     id: user.id,
     nickname: user.nickname,
     affiliationLabel: affiliationLabel(user),
+    status: user.status,
     createdAt: user.createdAt
   };
 }
@@ -260,7 +387,6 @@ function adminUser(room, user) {
   const stats = statsPayload(room, user.id);
   return {
     ...publicUser(user),
-    contact: user.contact,
     extraSignalLimit: user.extraSignalLimit,
     extraOpenSignalLimit: user.extraOpenSignalLimit,
     extraRevokeLimit: user.extraRevokeLimit,
@@ -273,6 +399,10 @@ function adminUser(room, user) {
     openSignalRemaining: stats.openSignalRemaining,
     revokeRemaining: stats.revokeRemaining
   };
+}
+
+function isApprovedUser(user) {
+  return user && user.status === USER_STATUS_APPROVED;
 }
 
 function hasSignalBetween(room, from, to) {
@@ -553,6 +683,32 @@ async function handleGrant(req, res) {
   sendJson(res, 200, { ok: true, user: adminUser(room, user) });
 }
 
+async function handleApproveUser(req, res) {
+  const store = await requireAdmin(req, res);
+  if (!store) return;
+  const body = await readBody(req);
+  const room = roomFromAdminRequest(store, body.roomCode);
+  const userId = cleanText(body.userId, 80);
+
+  if (!room) {
+    sendError(res, 404, "룸을 찾을 수 없습니다.");
+    return;
+  }
+
+  const user = room.users.find((entry) => entry.id === userId);
+  if (!user) {
+    sendError(res, 404, "참가자를 찾을 수 없습니다.");
+    return;
+  }
+
+  user.status = USER_STATUS_APPROVED;
+  user.approvedAt = new Date().toISOString();
+  room.updatedAt = new Date().toISOString();
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  sendJson(res, 200, { ok: true, user: adminUser(room, user) });
+}
+
 async function handleSession(req, res, store, room) {
   const body = await readBody(req);
   const nickname = cleanText(body.nickname, 32).replace(/\s+/g, " ");
@@ -592,6 +748,7 @@ async function handleSession(req, res, store, room) {
       extraOpenSignalLimit: 0,
       extraRevokeLimit: 0,
       revokesUsed: 0,
+      status: USER_STATUS_PENDING,
       passwordHash: hashPassword(password),
       createdAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString()
@@ -602,6 +759,17 @@ async function handleSession(req, res, store, room) {
   room.updatedAt = new Date().toISOString();
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
+  if (!isApprovedUser(user)) {
+    sendJson(res, 200, {
+      pending: true,
+      user: privateUser(user),
+      room: roomSummary(room),
+      stats: null,
+      matches: []
+    });
+    return;
+  }
+
   sendJson(res, 200, {
     user: privateUser(user),
     room: roomSummary(room),
@@ -613,7 +781,7 @@ async function handleSession(req, res, store, room) {
 function peoplePayload(room, user) {
   const matches = matchPayload(room, user.id);
   const people = room.users
-    .filter((entry) => entry.id !== user.id)
+    .filter((entry) => entry.id !== user.id && isApprovedUser(entry))
     .map((entry) => {
       const signalSent = hasSignalType(room, user.id, entry.id, SIGNAL);
       const openSignalSent = hasSignalType(room, user.id, entry.id, OPEN_SIGNAL);
@@ -642,6 +810,10 @@ async function handlePeople(req, res, room) {
     sendError(res, 401, "다시 로그인해주세요.");
     return;
   }
+  if (!isApprovedUser(user)) {
+    sendError(res, 403, "관리자 승인을 받는중입니다.");
+    return;
+  }
 
   sendJson(res, 200, peoplePayload(room, user));
 }
@@ -657,6 +829,14 @@ async function handleLikes(req, res, store, room) {
 
   if (!user || !target || user.id === target.id) {
     sendError(res, 400, "SIGNAL을 보낼 수 없습니다.");
+    return;
+  }
+  if (!isApprovedUser(user)) {
+    sendError(res, 403, "관리자 승인을 받는중입니다.");
+    return;
+  }
+  if (!isApprovedUser(target)) {
+    sendError(res, 400, "아직 승인되지 않은 참가자에게는 SIGNAL을 보낼 수 없습니다.");
     return;
   }
   if (hasSignalType(room, user.id, target.id, type)) {
@@ -711,6 +891,10 @@ async function handleRevokeLike(req, res, store, room) {
 
   if (!user || !target || user.id === target.id) {
     sendError(res, 400, "SIGNAL을 회수할 수 없습니다.");
+    return;
+  }
+  if (!isApprovedUser(user)) {
+    sendError(res, 403, "관리자 승인을 받는중입니다.");
     return;
   }
 
@@ -776,6 +960,10 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/admin/users/grant") {
     await handleGrant(req, res);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/users/approve") {
+    await handleApproveUser(req, res);
     return;
   }
 
