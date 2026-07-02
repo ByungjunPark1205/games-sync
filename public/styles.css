@@ -1223,7 +1223,7 @@ dialog::backdrop {
   padding: 14px 16px;
   border: 1px solid rgba(91, 156, 255, 0.42);
   border-radius: 14px;
-  background: rgba(232, 236, 243, 0.48);
+  background: rgba(232, 236, 243, 0.15);
   color: rgba(232, 236, 243, 0.95);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
   font-weight: 850;
