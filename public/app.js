@@ -522,7 +522,6 @@ elements.peopleList.addEventListener("click", async (event) => {
       });
       state.matches = data.matches;
       state.stats = data.stats;
-      showToast("SIGNAL을 회수했어요.");
       await loadPeople();
     } catch (error) {
       revokeButton.disabled = false;
@@ -549,13 +548,6 @@ elements.peopleList.addEventListener("click", async (event) => {
     });
     state.matches = data.matches;
     state.stats = data.stats;
-    showToast(
-      data.synced
-        ? "두 사람의 SIGNAL이 SYNC됐어요."
-        : type === OPEN_SIGNAL
-          ? "OPEN SIGNAL을 보냈어요."
-          : "SIGNAL을 보냈어요."
-    );
     await loadPeople();
   } catch (error) {
     button.disabled = false;
