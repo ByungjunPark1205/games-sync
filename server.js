@@ -802,7 +802,9 @@ async function requireAdmin(req, res) {
   const isEnvironmentKey = ADMIN_KEY && key === ADMIN_KEY;
   let store;
   try {
-    store = await readStore({ allowBootstrap: isEnvironmentKey });
+    store = await readStore({
+      allowBootstrap: isEnvironmentKey && (USE_UPSTASH_STORE || ALLOW_DATABASE_BOOTSTRAP)
+    });
   } catch (error) {
     if (error instanceof DatabaseMissingError) {
       sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. Render의 ADMIN_KEY로 다시 접속해주세요.");
