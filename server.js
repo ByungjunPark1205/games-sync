@@ -718,8 +718,8 @@ async function requireAdmin(req, res) {
   const store = await readStore();
   const key = cleanHeaderText(req.headers["x-admin-key"], 120);
   const isSavedKey = store.settings.adminKeyHash && verifyPassword(key, store.settings.adminKeyHash);
-  const isBootstrapKey = !store.settings.adminKeyHash && key === ADMIN_KEY;
-  if (!isSavedKey && !isBootstrapKey) {
+  const isEnvironmentKey = ADMIN_KEY && key === ADMIN_KEY;
+  if (!isSavedKey && !isEnvironmentKey) {
     sendError(res, 401, "관리자 코드가 올바르지 않습니다.");
     return null;
   }
