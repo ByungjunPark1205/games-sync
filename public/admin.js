@@ -16,6 +16,7 @@ const elements = {
   settingsForm: $("#adminSettingsForm"),
   createRoomForm: $("#createRoomForm"),
   adminKey: $("#adminKey"),
+  adminLoginError: $("#adminLoginError"),
   roomSelect: $("#roomSelect"),
   adminStorageStatus: $("#adminStorageStatus"),
   adminEventCode: $("#adminEventCode"),
@@ -35,6 +36,11 @@ const elements = {
 
 function showToast() {
   elements.toast.classList.add("hidden");
+}
+
+function showLoginError(message = "") {
+  elements.adminLoginError.textContent = message;
+  elements.adminLoginError.classList.toggle("hidden", !message);
 }
 
 function headerValue(value) {
@@ -165,12 +171,13 @@ async function loadDashboard(roomCode = state.roomCode) {
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   state.adminKey = elements.adminKey.value.trim();
+  showLoginError();
   try {
     await loadDashboard();
     localStorage.setItem("gamesSyncAdminKey", state.adminKey);
     showToast("관리자 페이지를 열었어요.");
   } catch (error) {
-    showToast(error.message);
+    showLoginError(error.message);
   }
 });
 

@@ -835,6 +835,20 @@ function storagePayload() {
   };
 }
 
+function storageDiagnosticsPayload() {
+  return {
+    provider: USE_UPSTASH_STORE ? "upstash" : "file",
+    upstashConfigured: USE_UPSTASH_STORE,
+    hasUpstashUrl: Boolean(UPSTASH_REDIS_REST_URL),
+    hasUpstashToken: Boolean(UPSTASH_REDIS_REST_TOKEN),
+    storeKey: USE_UPSTASH_STORE ? UPSTASH_STORE_KEY : null,
+    hasDataEncryptionKey: HAS_CONFIGURED_DATA_KEY,
+    allowDatabaseBootstrap: ALLOW_DATABASE_BOOTSTRAP,
+    canAdminBootstrap: USE_UPSTASH_STORE || ALLOW_DATABASE_BOOTSTRAP,
+    isRender: IS_RENDER
+  };
+}
+
 async function handleAdminStatus(req, res, url) {
   const store = await requireAdmin(req, res);
   if (!store) return;
@@ -1216,6 +1230,11 @@ async function handleRevokeLike(req, res, store, room) {
 }
 
 async function handleApi(req, res, url) {
+  if (req.method === "GET" && url.pathname === "/api/storage-info") {
+    sendJson(res, 200, storageDiagnosticsPayload());
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/check-code") {
     const body = await readBody(req);
     const code = cleanText(body.code, 80);
