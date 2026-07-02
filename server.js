@@ -8,7 +8,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 const ADMIN_KEY = process.env.ADMIN_KEY || "games-admin";
 const DATABASE_PATH =
   process.env.DATABASE_PATH || process.env.STORE_PATH || path.join(__dirname, "data", "games-sync.localdb");
-const LEGACY_STORE_PATH = process.env.LEGACY_STORE_PATH || path.join(__dirname, "data", "store.json");
+const LEGACY_STORE_PATH = process.env.LEGACY_STORE_PATH || "";
 const DATA_KEY_PATH = process.env.DATA_KEY_PATH || path.join(__dirname, "data", "encryption.key");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATABASE_ALGORITHM = "aes-256-gcm";
@@ -283,20 +283,61 @@ async function readStoreFile(filePath) {
   return { store: normalizeStore(payload), encrypted: false };
 }
 
+function storeScore(store) {
+  return store.rooms.reduce(
+    (score, room) => score + 1 + room.users.length * 10 + room.likes.length,
+    0
+  );
+}
+
+function legacyStorePaths() {
+  return [
+    LEGACY_STORE_PATH,
+    process.env.STORE_PATH,
+    path.join(path.dirname(DATABASE_PATH), "store.json"),
+    path.join(__dirname, "data", "store.json")
+  ]
+    .filter(Boolean)
+    .map((entry) => path.resolve(entry))
+    .filter((entry, index, entries) => entry !== path.resolve(DATABASE_PATH) && entries.indexOf(entry) === index);
+}
+
+async function richerLegacyStore(currentStore) {
+  const currentScore = storeScore(currentStore);
+
+  for (const legacyPath of legacyStorePaths()) {
+    try {
+      const result = await readStoreFile(legacyPath);
+      if (storeScore(result.store) > currentScore) {
+        return result.store;
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
+  return null;
+}
+
 async function readStore() {
   try {
     const result = await readStoreFile(DATABASE_PATH);
     if (!result.encrypted) {
       await writeStore(result.store);
     }
+    const legacyStore = await richerLegacyStore(result.store);
+    if (legacyStore) {
+      await writeStore(legacyStore);
+      return legacyStore;
+    }
     return result.store;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
 
-  if (path.resolve(LEGACY_STORE_PATH) !== path.resolve(DATABASE_PATH)) {
+  for (const legacyPath of legacyStorePaths()) {
     try {
-      const result = await readStoreFile(LEGACY_STORE_PATH);
+      const result = await readStoreFile(legacyPath);
       await writeStore(result.store);
       return result.store;
     } catch (error) {
