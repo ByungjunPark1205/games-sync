@@ -11,6 +11,12 @@ services:
         sync: false
       - key: DATA_ENCRYPTION_KEY
         sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: UPSTASH_STORE_KEY
+        value: games-sync:store
       - key: DATABASE_PATH
         value: /var/data/games-sync.localdb
       - key: ALLOW_DATABASE_BOOTSTRAP

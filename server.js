@@ -17,6 +17,10 @@ const ALLOW_DATABASE_BOOTSTRAP =
 const DATABASE_BACKUP_DIR =
   process.env.DATABASE_BACKUP_DIR || path.join(path.dirname(DATABASE_PATH), "backups");
 const MAX_DATABASE_BACKUPS = positiveInt(process.env.MAX_DATABASE_BACKUPS, 30);
+const UPSTASH_REDIS_REST_URL = cleanText(process.env.UPSTASH_REDIS_REST_URL, 300).replace(/\/+$/, "");
+const UPSTASH_REDIS_REST_TOKEN = cleanText(process.env.UPSTASH_REDIS_REST_TOKEN, 500);
+const UPSTASH_STORE_KEY = cleanText(process.env.UPSTASH_STORE_KEY || "games-sync:store", 160);
+const USE_UPSTASH_STORE = Boolean(UPSTASH_REDIS_REST_URL && UPSTASH_REDIS_REST_TOKEN);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATABASE_ALGORITHM = "aes-256-gcm";
 
@@ -323,13 +327,47 @@ async function decryptStorePayload(payload) {
   }
 }
 
-async function readStoreFile(filePath) {
-  const raw = await fs.readFile(filePath, "utf8");
+async function readStorePayload(raw) {
   const payload = JSON.parse(raw);
   if (isEncryptedDatabase(payload)) {
     return { store: await decryptStorePayload(payload), encrypted: true };
   }
   return { store: normalizeStore(payload), encrypted: false };
+}
+
+async function readStoreFile(filePath) {
+  return readStorePayload(await fs.readFile(filePath, "utf8"));
+}
+
+async function upstashCommand(command) {
+  const response = await fetch(UPSTASH_REDIS_REST_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(command)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    throw new Error(data.error || `Upstash request failed with HTTP ${response.status}`);
+  }
+  return data.result;
+}
+
+async function readStoreFromUpstash() {
+  const raw = await upstashCommand(["GET", UPSTASH_STORE_KEY]);
+  if (raw === null || raw === undefined) {
+    const error = new Error("Upstash store key is missing.");
+    error.code = "ENOENT";
+    throw error;
+  }
+  return readStorePayload(raw);
+}
+
+async function writeStoreToUpstash(store) {
+  const encryptedPayload = await encryptStorePayload(store);
+  await upstashCommand(["SET", UPSTASH_STORE_KEY, JSON.stringify(encryptedPayload)]);
 }
 
 function backupStamp() {
@@ -429,6 +467,18 @@ async function richerLegacyStore(currentStore) {
 async function readStore(options = {}) {
   const allowBootstrap = options.allowBootstrap === true || ALLOW_DATABASE_BOOTSTRAP;
 
+  if (USE_UPSTASH_STORE) {
+    try {
+      const result = await readStoreFromUpstash();
+      if (!result.encrypted) {
+        await writeStore(result.store);
+      }
+      return result.store;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
   try {
     const result = await readStoreFile(DATABASE_PATH);
     if (!result.encrypted) {
@@ -461,9 +511,12 @@ async function readStore(options = {}) {
   }
 
   if (!allowBootstrap) {
+    const missingTarget = USE_UPSTASH_STORE
+      ? `Upstash Redis key ${UPSTASH_STORE_KEY}`
+      : `database file at ${DATABASE_PATH}`;
     throw new DatabaseMissingError(
-      `Database file is missing at ${DATABASE_PATH}. Refusing to create a fresh empty database. ` +
-        "Attach a persistent disk to this path, restore a backup, or set ALLOW_DATABASE_BOOTSTRAP=true once for first setup."
+      `${missingTarget} is missing. Refusing to create a fresh empty database. ` +
+        "Restore a backup, use the Render ADMIN_KEY, or set ALLOW_DATABASE_BOOTSTRAP=true once for first setup."
     );
   }
 
@@ -473,6 +526,11 @@ async function readStore(options = {}) {
 }
 
 async function writeStore(store, options = {}) {
+  if (USE_UPSTASH_STORE) {
+    await writeStoreToUpstash(store);
+    return;
+  }
+
   await fs.mkdir(path.dirname(DATABASE_PATH), { recursive: true });
   if (options.backup !== false) {
     await backupCurrentDatabase();
@@ -760,9 +818,10 @@ function roomFromAdminRequest(store, code) {
 
 function storagePayload() {
   return {
-    databasePath: DATABASE_PATH,
+    provider: USE_UPSTASH_STORE ? "upstash" : "file",
+    databasePath: USE_UPSTASH_STORE ? `upstash:${UPSTASH_STORE_KEY}` : DATABASE_PATH,
     dataKeyPath: process.env.DATA_ENCRYPTION_KEY || process.env.DB_ENCRYPTION_KEY ? "environment secret" : DATA_KEY_PATH,
-    backupDir: DATABASE_BACKUP_DIR,
+    backupDir: USE_UPSTASH_STORE ? "upstash managed storage" : DATABASE_BACKUP_DIR,
     allowDatabaseBootstrap: ALLOW_DATABASE_BOOTSTRAP,
     isRender: IS_RENDER
   };

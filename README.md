@@ -66,11 +66,19 @@ Recommended settings:
 - Start Command: `npm start`
 - Environment variable `ADMIN_KEY`: set this to a private admin password
 - Environment variable `DATA_ENCRYPTION_KEY`: set this to a long private secret
+- Environment variable `UPSTASH_REDIS_REST_URL`: recommended on free Render services
+- Environment variable `UPSTASH_REDIS_REST_TOKEN`: recommended on free Render services
+- Environment variable `UPSTASH_STORE_KEY`: optional, defaults to `games-sync:store`
 - Environment variable `DATABASE_PATH`: `/var/data/games-sync.localdb`
 - Environment variable `ALLOW_DATABASE_BOOTSTRAP`: keep this as `false` after the first database exists
 - Persistent disk mount path: `/var/data`
 
-Render services use an ephemeral filesystem by default, so a persistent disk is required for real events. If the
+Render services use an ephemeral filesystem by default, so a persistent disk or external datastore is required for real events.
+On free Render services, use Upstash Redis instead of Render Disk. When both `UPSTASH_REDIS_REST_URL` and
+`UPSTASH_REDIS_REST_TOKEN` are set, the app stores its encrypted database payload in Upstash under
+`UPSTASH_STORE_KEY` and ignores the local file database for normal reads and writes.
+
+If you use the local file database, the
 database file is missing in production, the app refuses to create a fresh empty database unless
 `ALLOW_DATABASE_BOOTSTRAP=true` is set. This prevents a restart from silently looking like all rooms and members
 were reset. Only turn bootstrap on for a first setup, then turn it back off.
