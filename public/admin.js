@@ -1,0 +1,240 @@
+const state = {
+  adminKey: localStorage.getItem("gamesSyncAdminKey") || "",
+  rooms: [],
+  roomCode: "",
+  users: []
+};
+
+const $ = (selector) => document.querySelector(selector);
+
+const elements = {
+  loginPanel: $("#adminLoginPanel"),
+  dashboard: $("#adminDashboard"),
+  createRoomPanel: $("#createRoomPanel"),
+  participantsPanel: $("#participantsPanel"),
+  loginForm: $("#adminLoginForm"),
+  settingsForm: $("#adminSettingsForm"),
+  createRoomForm: $("#createRoomForm"),
+  adminKey: $("#adminKey"),
+  roomSelect: $("#roomSelect"),
+  adminEventCode: $("#adminEventCode"),
+  adminSignalLimit: $("#adminSignalLimit"),
+  adminOpenSignalLimit: $("#adminOpenSignalLimit"),
+  newAdminKey: $("#newAdminKey"),
+  newRoomCode: $("#newRoomCode"),
+  newRoomSignalLimit: $("#newRoomSignalLimit"),
+  newRoomOpenSignalLimit: $("#newRoomOpenSignalLimit"),
+  adminRefresh: $("#adminRefresh"),
+  adminCount: $("#adminCount"),
+  adminUserList: $("#adminUserList"),
+  toast: $("#toast")
+};
+
+function showToast(message) {
+  elements.toast.textContent = message;
+  elements.toast.classList.remove("hidden");
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(() => {
+    elements.toast.classList.add("hidden");
+  }, 3200);
+}
+
+async function adminRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "content-type": "application/json",
+      "x-admin-key": state.adminKey,
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "관리자 요청을 처리하지 못했어요.");
+  }
+  return data;
+}
+
+function setDashboardVisible(visible) {
+  elements.loginPanel.classList.toggle("hidden", visible);
+  elements.dashboard.classList.toggle("hidden", !visible);
+  elements.createRoomPanel.classList.toggle("hidden", !visible);
+  elements.participantsPanel.classList.toggle("hidden", !visible);
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function renderRooms() {
+  elements.roomSelect.innerHTML = state.rooms
+    .map((room) => `<option value="${escapeHtml(room.code)}">${escapeHtml(room.code)} · ${room.usersCount}명</option>`)
+    .join("");
+  elements.roomSelect.value = state.roomCode;
+}
+
+function renderUsers() {
+  elements.adminCount.textContent = `${state.users.length}명`;
+  if (!state.users.length) {
+    elements.adminUserList.innerHTML = `<div class="empty-state">현재 룸에는 아직 참가자가 없어요.</div>`;
+    return;
+  }
+
+  elements.adminUserList.innerHTML = state.users
+    .map(
+      (user) => `
+        <article class="admin-user-card" data-user="${user.id}">
+          <div>
+            <h3>${escapeHtml(user.nickname)}</h3>
+            <p class="affiliation-chip">${escapeHtml(user.affiliationLabel)}</p>
+            <p class="admin-user-meta">SIGNAL ${user.signalRemaining}/${user.signalLimit} · OPEN ${user.openSignalRemaining}/${user.openSignalLimit} · 받은 SIGNAL ${user.receivedCount}</p>
+          </div>
+          <form class="grant-form">
+            <label>
+              <span>추가 SIGNAL</span>
+              <input name="addSignal" type="number" min="0" step="1" value="1" />
+            </label>
+            <label>
+              <span>추가 OPEN</span>
+              <input name="addOpenSignal" type="number" min="0" step="1" value="0" />
+            </label>
+            <button class="ghost-button" type="submit">추가</button>
+          </form>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function applyRoom(room) {
+  if (!room) return;
+  state.roomCode = room.code;
+  elements.adminEventCode.value = room.code;
+  elements.adminSignalLimit.value = room.signalLimit;
+  elements.adminOpenSignalLimit.value = room.openSignalLimit;
+}
+
+async function loadDashboard(roomCode = state.roomCode) {
+  const query = roomCode ? `?roomCode=${encodeURIComponent(roomCode)}` : "";
+  const data = await adminRequest(`/api/admin/status${query}`);
+  state.rooms = data.rooms;
+  applyRoom(data.room || data.rooms[0]);
+  state.users = data.users;
+  renderRooms();
+  renderUsers();
+  setDashboardVisible(true);
+}
+
+elements.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  state.adminKey = elements.adminKey.value.trim();
+  try {
+    await loadDashboard();
+    localStorage.setItem("gamesSyncAdminKey", state.adminKey);
+    showToast("관리자 페이지를 열었어요.");
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.roomSelect.addEventListener("change", async () => {
+  try {
+    await loadDashboard(elements.roomSelect.value);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.settingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const data = await adminRequest("/api/admin/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode,
+        eventCode: elements.adminEventCode.value,
+        signalLimit: elements.adminSignalLimit.value,
+        openSignalLimit: elements.adminOpenSignalLimit.value,
+        newAdminKey: elements.newAdminKey.value
+      })
+    });
+    if (data.adminKeyChanged) {
+      state.adminKey = elements.newAdminKey.value;
+      localStorage.setItem("gamesSyncAdminKey", state.adminKey);
+      elements.adminKey.value = state.adminKey;
+      elements.newAdminKey.value = "";
+    }
+    showToast(data.resetSignals ? "입장 코드가 변경되어 현재 룸의 SIGNAL 기록이 초기화됐어요." : "룸 설정을 저장했어요.");
+    await loadDashboard(data.room.code);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.createRoomForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const data = await adminRequest("/api/admin/rooms", {
+      method: "POST",
+      body: JSON.stringify({
+        code: elements.newRoomCode.value,
+        signalLimit: elements.newRoomSignalLimit.value,
+        openSignalLimit: elements.newRoomOpenSignalLimit.value
+      })
+    });
+    elements.newRoomCode.value = "";
+    showToast("새 룸을 만들었어요.");
+    await loadDashboard(data.room.code);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.adminRefresh.addEventListener("click", async () => {
+  try {
+    await loadDashboard();
+    showToast("새로고침했어요.");
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.adminUserList.addEventListener("submit", async (event) => {
+  const form = event.target.closest(".grant-form");
+  if (!form) return;
+  event.preventDefault();
+  const card = event.target.closest("[data-user]");
+  try {
+    await adminRequest("/api/admin/users/grant", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode,
+        userId: card.dataset.user,
+        addSignal: form.elements.addSignal.value,
+        addOpenSignal: form.elements.addOpenSignal.value
+      })
+    });
+    showToast("참가자의 SIGNAL 개수를 추가했어요.");
+    await loadDashboard();
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+async function boot() {
+  if (state.adminKey) {
+    elements.adminKey.value = state.adminKey;
+    try {
+      await loadDashboard();
+    } catch {
+      setDashboardVisible(false);
+    }
+  }
+}
+
+boot();

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#121212" />
+    <title>Games Sync Admin</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell admin-shell">
+      <section class="hero navy-card admin-hero" aria-labelledby="admin-title">
+        <div class="brand-row">
+          <a class="icon-button admin-button" href="/" aria-label="홈으로 이동" title="홈으로 이동">HOME</a>
+        </div>
+        <div class="hero-copy">
+          <p class="eyebrow">Games Signal project</p>
+          <h1 id="admin-title">ADMIN</h1>
+          <p class="tagline">입장 코드와 SIGNAL 운영을 관리해요.</p>
+        </div>
+      </section>
+
+      <section class="panel" id="adminLoginPanel">
+        <h2>관리자 로그인</h2>
+        <form id="adminLoginForm" class="form-stack">
+          <label>
+            <span>관리자 코드</span>
+            <input id="adminKey" type="password" autocomplete="current-password" placeholder="관리자 코드" required />
+          </label>
+          <button class="primary-button" type="submit">관리자 페이지 열기</button>
+        </form>
+      </section>
+
+      <section class="panel hidden" id="adminDashboard">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Control Room</p>
+            <h2>룸 설정</h2>
+          </div>
+          <button class="ghost-button refresh-button" id="adminRefresh" type="button">새로고침</button>
+        </div>
+
+        <label>
+          <span>관리할 룸</span>
+          <select id="roomSelect"></select>
+        </label>
+
+        <form id="adminSettingsForm" class="form-stack">
+          <label>
+            <span>입장 코드</span>
+            <input id="adminEventCode" minlength="4" required />
+          </label>
+          <div class="admin-limits">
+            <label>
+              <span>기본 SIGNAL</span>
+              <input id="adminSignalLimit" type="number" min="0" step="1" required />
+            </label>
+            <label>
+              <span>기본 OPEN SIGNAL</span>
+              <input id="adminOpenSignalLimit" type="number" min="0" step="1" required />
+            </label>
+          </div>
+          <label>
+            <span>새 관리자 코드</span>
+            <input id="newAdminKey" type="password" autocomplete="new-password" placeholder="변경할 때만 입력" minlength="4" />
+          </label>
+          <button class="primary-button" type="submit">설정 저장</button>
+        </form>
+      </section>
+
+      <section class="panel hidden" id="createRoomPanel">
+        <h2>새 룸 만들기</h2>
+        <form id="createRoomForm" class="form-stack">
+          <label>
+            <span>새 입장 코드</span>
+            <input id="newRoomCode" minlength="4" placeholder="예: ROOM2026" required />
+          </label>
+          <div class="admin-limits">
+            <label>
+              <span>기본 SIGNAL</span>
+              <input id="newRoomSignalLimit" type="number" min="0" step="1" value="10" required />
+            </label>
+            <label>
+              <span>기본 OPEN</span>
+              <input id="newRoomOpenSignalLimit" type="number" min="0" step="1" value="1" required />
+            </label>
+          </div>
+          <button class="primary-button" type="submit">룸 추가</button>
+        </form>
+      </section>
+
+      <section class="panel hidden" id="participantsPanel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Participants</p>
+            <h2>현재 룸 참가자</h2>
+          </div>
+          <p class="admin-count" id="adminCount">0명</p>
+        </div>
+        <div class="admin-user-list" id="adminUserList"></div>
+      </section>
+
+      <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script src="/admin.js"></script>
+  </body>
+</html>

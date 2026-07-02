@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#121212" />
+    <title>Games Sync</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero navy-card simple-hero" aria-labelledby="app-title">
+        <div class="sync-logo" aria-label="SYNC">
+          <h1 id="app-title">SYNC</h1>
+          <span class="logo-star star-large" aria-hidden="true"></span>
+          <span class="logo-star star-mid" aria-hidden="true"></span>
+          <span class="logo-star star-small" aria-hidden="true"></span>
+        </div>
+      </section>
+
+      <section class="panel gate-panel simple-gate" id="gateView" aria-label="입장 코드 입력">
+        <form id="gateForm" class="form-stack">
+          <label>
+            <input id="eventCode" name="eventCode" autocomplete="one-time-code" placeholder="입장 코드" required />
+          </label>
+          <button class="primary-button" type="submit">입장하기</button>
+        </form>
+      </section>
+
+      <section class="panel hidden" id="loginView" aria-labelledby="login-title">
+        <h2 id="login-title">내 정보</h2>
+        <p class="hint">닉네임, 연락처, 비밀번호, 소속 정보는 재입장할 때 다시 사용돼요. 꼭 기억해두세요.</p>
+        <form id="loginForm" class="form-stack">
+          <label>
+            <span>닉네임</span>
+            <input id="nickname" name="nickname" autocomplete="nickname" placeholder="입장 때 걸 닉네임" maxlength="32" required />
+          </label>
+          <label>
+            <span>소속</span>
+            <select id="affiliation" name="affiliation">
+              <option value="">직접 입력 / 지인</option>
+              <option value="Games">Games</option>
+              <option value="동물원">동물원</option>
+              <option value="수녀원">수녀원</option>
+            </select>
+          </label>
+          <label id="affiliationDetailWrap">
+            <span>어떤 소속의 누구 지인인가요?</span>
+            <input id="affiliationDetail" name="affiliationDetail" autocomplete="off" placeholder="예: Games 민호 지인" maxlength="80" />
+          </label>
+          <label>
+            <span>연락처</span>
+            <input id="contact" name="contact" autocomplete="off" placeholder="인스타 아이디 혹은 전화번호" maxlength="80" required />
+          </label>
+          <label>
+            <span>본인 설정 비밀번호</span>
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="재입장용 비밀번호" minlength="4" required />
+          </label>
+          <button class="primary-button" type="submit">SIGNAL 시작하기</button>
+        </form>
+      </section>
+
+      <section class="hidden home-screen" id="homeView" aria-labelledby="home-title">
+        <section class="hidden profile-view" id="profileView" aria-labelledby="profile-title">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">My Sync</p>
+              <h2 id="profile-title">내정보</h2>
+            </div>
+            <button class="ghost-button refresh-button" id="profileRefreshButton" type="button">새로고침</button>
+          </div>
+          <div class="profile-card">
+            <div class="profile-orbit" aria-hidden="true"></div>
+            <p class="profile-label">지금 이 정보로 접속 중이에요</p>
+            <h3 id="profileNickname">-</h3>
+            <dl class="profile-details">
+              <div>
+                <dt>소속</dt>
+                <dd id="profileAffiliation">-</dd>
+              </div>
+              <div>
+                <dt>연락처</dt>
+                <dd id="profileContact">-</dd>
+              </div>
+              <div>
+                <dt>입장 코드</dt>
+                <dd id="profileCode">-</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <div id="homeContent">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Tonight's Signal</p>
+              <h2 id="home-title">SIGNAL 보내기</h2>
+            </div>
+            <button class="ghost-button refresh-button" id="refreshButton" type="button">새로고침</button>
+          </div>
+
+          <section class="stats-grid" id="statsPanel" aria-label="SIGNAL 현황"></section>
+
+          <div class="tabs" role="tablist" aria-label="보기 선택">
+            <button class="tab active" id="peopleTab" type="button" role="tab" aria-selected="true">참가자</button>
+            <button class="tab" id="matchesTab" type="button" role="tab" aria-selected="false">SYNC</button>
+          </div>
+
+          <div class="list" id="peopleList"></div>
+          <div class="list hidden" id="matchesList"></div>
+        </div>
+
+        <section class="hidden notifications-view" id="notificationsView" aria-labelledby="notifications-title">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Timeline</p>
+              <h2 id="notifications-title">알림</h2>
+            </div>
+            <button class="ghost-button refresh-button" id="notificationRefreshButton" type="button">새로고침</button>
+          </div>
+          <div class="timeline-list" id="notificationList"></div>
+        </section>
+
+        <nav class="bottom-nav three-nav" aria-label="주요 메뉴">
+          <button class="nav-item" id="profileNav" type="button">내정보</button>
+          <button class="nav-item active" id="homeNav" type="button">홈</button>
+          <button class="nav-item" id="alertsNav" type="button">알림</button>
+        </nav>
+      </section>
+
+      <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

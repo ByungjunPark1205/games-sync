@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: games-sync
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: ADMIN_KEY
+        sync: false
+      - key: STORE_PATH
+        value: /var/data/store.json
+    disk:
+      name: games-sync-data
+      mountPath: /var/data
+      sizeGB: 1
