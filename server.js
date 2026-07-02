@@ -18,6 +18,7 @@ const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
   ".svg": "image/svg+xml; charset=utf-8",
   ".ttf": "font/ttf",
   ".ico": "image/x-icon"
@@ -193,6 +194,20 @@ function sendJson(res, status, payload) {
 
 function sendError(res, status, message) {
   sendJson(res, status, { error: message });
+}
+
+function requestOrigin(req) {
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const host = forwardedHost || req.headers.host || `localhost:${PORT}`;
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const proto =
+    forwardedProto ||
+    (String(host).startsWith("localhost") || String(host).startsWith("127.") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+function renderHtml(html, req) {
+  return html.replaceAll("__APP_ORIGIN__", requestOrigin(req));
 }
 
 async function readBody(req) {
@@ -717,15 +732,15 @@ async function serveStatic(req, res, url) {
       "content-type": MIME_TYPES[ext] || "application/octet-stream",
       "cache-control": "no-cache"
     });
-    res.end(data);
+    res.end(ext === ".html" ? renderHtml(data.toString("utf8"), req) : data);
   } catch (error) {
     if (error.code === "ENOENT") {
-      const data = await fs.readFile(path.join(PUBLIC_DIR, "index.html"));
+      const data = await fs.readFile(path.join(PUBLIC_DIR, "index.html"), "utf8");
       res.writeHead(200, {
         "content-type": MIME_TYPES[".html"],
         "cache-control": "no-cache"
       });
-      res.end(data);
+      res.end(renderHtml(data, req));
       return;
     }
     throw error;
