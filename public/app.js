@@ -398,24 +398,13 @@ elements.gateForm.addEventListener("submit", async (event) => {
     });
     state.code = code;
     state.room = data.room;
-    state.user = loadSavedUserForCode(code);
+    const savedUser = loadSavedUserForCode(code);
+    state.user = null;
     sessionStorage.setItem("gamesSyncCode", code);
+    fillLoginFormFromUser(savedUser || {});
     showToast(data.message);
-    setView(state.user?.id ? "home" : "login");
+    setView("login");
     setSection("home");
-    if (state.user?.id) {
-      try {
-        await loadPeople();
-      } catch (error) {
-        if (error.status === 403 || state.user.status === "pending") {
-          showPendingApproval();
-        } else {
-          fallbackToLogin();
-        }
-      }
-    } else {
-      fillLoginFormFromUser(state.user || {});
-    }
   } catch (error) {
     showToast(error.message);
   }
@@ -541,12 +530,13 @@ elements.notificationRefreshButton.addEventListener("click", refreshCurrentState
 
 async function boot() {
   updateAffiliationInput();
+  let savedUser = null;
   if (state.code) {
     elements.eventCode.value = state.code;
-    state.user = loadSavedUserForCode(state.code);
+    savedUser = loadSavedUserForCode(state.code);
   }
-  if (state.user) {
-    fillLoginFormFromUser(state.user);
+  if (savedUser) {
+    fillLoginFormFromUser(savedUser);
   }
 
   if (!state.code) {
@@ -554,22 +544,8 @@ async function boot() {
     return;
   }
 
-  if (!state.user?.id) {
-    setView("login");
-    return;
-  }
-
-  setView("home");
-  setSection("home");
-  try {
-    await loadPeople();
-  } catch (error) {
-    if (error.status === 403 || state.user.status === "pending") {
-      showPendingApproval();
-    } else {
-      fallbackToLogin();
-    }
-  }
+  state.user = null;
+  setView("login");
 }
 
 boot();
