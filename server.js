@@ -326,7 +326,14 @@ function statsPayload(room, userId) {
   const sentOpenSignalCount = room.likes.filter(
     (like) => like.from === userId && like.type === OPEN_SIGNAL
   ).length;
-  const receivedCount = room.likes.filter((like) => like.to === userId).length;
+  const receivedCount = new Set(
+    room.likes.filter((like) => like.to === userId).map((like) => like.from)
+  ).size;
+  const receivedSignals = room.likes
+    .filter((like) => like.to === userId && like.type === SIGNAL)
+    .map((like) => ({
+      sentAt: like.createdAt
+    }));
   const openSignals = room.likes
     .filter((like) => like.to === userId && like.type === OPEN_SIGNAL)
     .map((like) => {
@@ -349,6 +356,7 @@ function statsPayload(room, userId) {
     openSignalLimit,
     signalRemaining: Math.max(0, signalLimit - sentSignalCount),
     openSignalRemaining: Math.max(0, openSignalLimit - sentOpenSignalCount),
+    receivedSignals,
     openSignals
   };
 }

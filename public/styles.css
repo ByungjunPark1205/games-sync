@@ -975,6 +975,17 @@ select:focus {
   border-color: rgba(91, 156, 255, 0.42);
 }
 
+.timeline-signal {
+  border-color: rgba(142, 201, 255, 0.34);
+}
+
+.timeline-signal .timeline-dot {
+  background: var(--cyan);
+  box-shadow:
+    0 0 0 5px rgba(142, 201, 255, 0.12),
+    0 0 18px rgba(142, 201, 255, 0.62);
+}
+
 .nav-item {
   display: grid;
   min-height: 42px;

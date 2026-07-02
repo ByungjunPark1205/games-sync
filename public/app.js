@@ -8,7 +8,6 @@ const state = {
   people: [],
   matches: [],
   stats: null,
-  view: "people",
   section: "home"
 };
 
@@ -34,14 +33,11 @@ const elements = {
   password: $("#password"),
   statsPanel: $("#statsPanel"),
   peopleList: $("#peopleList"),
-  matchesList: $("#matchesList"),
   notificationList: $("#notificationList"),
   profileNickname: $("#profileNickname"),
   profileAffiliation: $("#profileAffiliation"),
   profileContact: $("#profileContact"),
   profileCode: $("#profileCode"),
-  peopleTab: $("#peopleTab"),
-  matchesTab: $("#matchesTab"),
   refreshButton: $("#refreshButton"),
   profileRefreshButton: $("#profileRefreshButton"),
   notificationRefreshButton: $("#notificationRefreshButton"),
@@ -137,16 +133,6 @@ function setSection(section) {
   if (alertsActive) renderNotifications();
 }
 
-function renderTabs() {
-  const matchesActive = state.view === "matches";
-  elements.peopleTab.classList.toggle("active", !matchesActive);
-  elements.matchesTab.classList.toggle("active", matchesActive);
-  elements.peopleTab.setAttribute("aria-selected", String(!matchesActive));
-  elements.matchesTab.setAttribute("aria-selected", String(matchesActive));
-  elements.peopleList.classList.toggle("hidden", matchesActive);
-  elements.matchesList.classList.toggle("hidden", !matchesActive);
-}
-
 function renderProfile() {
   const user = state.user || {};
   elements.profileNickname.textContent = user.nickname || "-";
@@ -158,12 +144,11 @@ function renderProfile() {
 function renderStats() {
   const stats = state.stats || {
     receivedCount: 0,
-    sentSignalCount: 0,
-    sentOpenSignalCount: 0,
     signalLimit: 10,
     openSignalLimit: 1,
     signalRemaining: 10,
     openSignalRemaining: 1,
+    receivedSignals: [],
     openSignals: []
   };
 
@@ -190,14 +175,28 @@ function renderPeople() {
   }
 
   const stats = state.stats || {};
-  elements.peopleList.innerHTML = state.people
-    .map(
-      (person) => `
-        <article class="person-card">
+  const matchById = new Map(state.matches.map((match) => [match.id, match]));
+  const sortedPeople = [...state.people].sort((a, b) => {
+    const aMatch = matchById.get(a.id);
+    const bMatch = matchById.get(b.id);
+    if (aMatch && bMatch) return new Date(bMatch.matchedAt) - new Date(aMatch.matchedAt);
+    return Number(Boolean(bMatch)) - Number(Boolean(aMatch));
+  });
+
+  elements.peopleList.innerHTML = sortedPeople
+    .map((person) => {
+      const match = matchById.get(person.id);
+      const isSynced = Boolean(match);
+      return `
+        <article class="person-card ${isSynced ? "match-card" : ""}">
           <div>
             <h3>${escapeHtml(person.nickname)}</h3>
             <p class="affiliation-chip">${escapeHtml(person.affiliationLabel || "소속 미입력")}</p>
-            <p>마음이 가면 SIGNAL을 보내세요.</p>
+            ${
+              isSynced
+                ? `<p class="contact-line">연락처: ${escapeHtml(match.contact)}</p>`
+                : `<p>마음이 가면 SIGNAL을 보내세요.</p>`
+            }
           </div>
           <div class="signal-actions">
             <button class="like-button ${person.signalSent ? "liked" : ""}" type="button" data-like="${person.id}" data-type="${SIGNAL}" ${person.signalSent || stats.signalRemaining <= 0 ? "disabled" : ""}>
@@ -208,36 +207,21 @@ function renderPeople() {
             </button>
           </div>
         </article>
-      `
-    )
-    .join("");
-}
-
-function renderMatches() {
-  if (!state.matches.length) {
-    elements.matchesList.innerHTML = `<div class="empty-state">아직 SYNC된 사람이 없어요. SYNC되면 이곳에 연락처가 표시됩니다.</div>`;
-    return;
-  }
-
-  elements.matchesList.innerHTML = state.matches
-    .map(
-      (match) => `
-        <article class="person-card match-card">
-          <div>
-            <h3>${escapeHtml(match.nickname)}</h3>
-            <p class="affiliation-chip">${escapeHtml(match.affiliationLabel || "소속 미입력")}</p>
-            <p class="contact-line">연락처: ${escapeHtml(match.contact)}</p>
-          </div>
-          <button class="like-button synced" type="button" disabled>SYNC</button>
-        </article>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
 function notificationItems() {
-  const openSignals = state.stats?.openSignals || [];
-  const openItems = openSignals.map((person) => ({
+  const signalItems = (state.stats?.receivedSignals || []).map((signal) => ({
+    type: "signal",
+    title: "새로운 SIGNAL을 받았어요.",
+    time: signal.sentAt,
+    body: "누군가 마음을 보냈어요.",
+    note: ""
+  }));
+
+  const openItems = (state.stats?.openSignals || []).map((person) => ({
     type: "open",
     title: `${person.nickname}님이 OPEN SIGNAL을 보냈어요.`,
     time: person.sentAt,
@@ -253,20 +237,20 @@ function notificationItems() {
     note: "두 사람의 SIGNAL이 SYNC됐어요."
   }));
 
-  return [...openItems, ...syncItems].sort((a, b) => new Date(b.time) - new Date(a.time));
+  return [...signalItems, ...openItems, ...syncItems].sort((a, b) => new Date(b.time) - new Date(a.time));
 }
 
 function renderNotifications() {
   const items = notificationItems();
   if (!items.length) {
-    elements.notificationList.innerHTML = `<div class="empty-state">아직 알림이 없어요. OPEN SIGNAL이나 SYNC가 생기면 시간순으로 표시됩니다.</div>`;
+    elements.notificationList.innerHTML = `<div class="empty-state">아직 알림이 없어요. SIGNAL, OPEN SIGNAL, SYNC가 생기면 시간순으로 표시됩니다.</div>`;
     return;
   }
 
   elements.notificationList.innerHTML = items
     .map(
       (item) => `
-        <article class="timeline-item ${item.type === "sync" ? "timeline-sync" : "timeline-open"}">
+        <article class="timeline-item ${item.type === "sync" ? "timeline-sync" : item.type === "open" ? "timeline-open" : "timeline-signal"}">
           <div class="timeline-dot" aria-hidden="true"></div>
           <div>
             <time>${formatTime(item.time)}</time>
@@ -283,9 +267,7 @@ function renderNotifications() {
 function render() {
   renderProfile();
   renderStats();
-  renderTabs();
   renderPeople();
-  renderMatches();
   renderNotifications();
 }
 
@@ -412,16 +394,6 @@ elements.peopleList.addEventListener("click", async (event) => {
     button.disabled = false;
     showToast(error.message);
   }
-});
-
-elements.peopleTab.addEventListener("click", () => {
-  state.view = "people";
-  renderTabs();
-});
-
-elements.matchesTab.addEventListener("click", () => {
-  state.view = "matches";
-  renderTabs();
 });
 
 elements.profileNav.addEventListener("click", () => {
