@@ -20,10 +20,12 @@ const elements = {
   adminEventCode: $("#adminEventCode"),
   adminSignalLimit: $("#adminSignalLimit"),
   adminOpenSignalLimit: $("#adminOpenSignalLimit"),
+  adminRevokeLimit: $("#adminRevokeLimit"),
   newAdminKey: $("#newAdminKey"),
   newRoomCode: $("#newRoomCode"),
   newRoomSignalLimit: $("#newRoomSignalLimit"),
   newRoomOpenSignalLimit: $("#newRoomOpenSignalLimit"),
+  newRoomRevokeLimit: $("#newRoomRevokeLimit"),
   adminRefresh: $("#adminRefresh"),
   adminCount: $("#adminCount"),
   adminUserList: $("#adminUserList"),
@@ -96,7 +98,7 @@ function renderUsers() {
           <div>
             <h3>${escapeHtml(user.nickname)}</h3>
             <p class="affiliation-chip">${escapeHtml(user.affiliationLabel)}</p>
-            <p class="admin-user-meta">SIGNAL ${user.signalRemaining}/${user.signalLimit} · OPEN ${user.openSignalRemaining}/${user.openSignalLimit} · 받은 SIGNAL ${user.receivedCount}</p>
+            <p class="admin-user-meta">SIGNAL ${user.signalRemaining}/${user.signalLimit} · OPEN ${user.openSignalRemaining}/${user.openSignalLimit} · 회수 ${user.revokeRemaining}/${user.revokeLimit} · 받은 SIGNAL ${user.receivedCount}</p>
           </div>
           <form class="grant-form">
             <label>
@@ -106,6 +108,10 @@ function renderUsers() {
             <label>
               <span>추가 OPEN</span>
               <input name="addOpenSignal" type="number" min="0" step="1" value="0" />
+            </label>
+            <label>
+              <span>추가 회수권</span>
+              <input name="addRevoke" type="number" min="0" step="1" value="0" />
             </label>
             <button class="ghost-button" type="submit">추가</button>
           </form>
@@ -121,6 +127,7 @@ function applyRoom(room) {
   elements.adminEventCode.value = room.code;
   elements.adminSignalLimit.value = room.signalLimit;
   elements.adminOpenSignalLimit.value = room.openSignalLimit;
+  elements.adminRevokeLimit.value = room.revokeLimit;
 }
 
 async function loadDashboard(roomCode = state.roomCode) {
@@ -164,6 +171,7 @@ elements.settingsForm.addEventListener("submit", async (event) => {
         eventCode: elements.adminEventCode.value,
         signalLimit: elements.adminSignalLimit.value,
         openSignalLimit: elements.adminOpenSignalLimit.value,
+        revokeLimit: elements.adminRevokeLimit.value,
         newAdminKey: elements.newAdminKey.value
       })
     });
@@ -173,7 +181,7 @@ elements.settingsForm.addEventListener("submit", async (event) => {
       elements.adminKey.value = state.adminKey;
       elements.newAdminKey.value = "";
     }
-    showToast(data.resetSignals ? "입장 코드가 변경되어 현재 룸의 SIGNAL 기록이 초기화됐어요." : "룸 설정을 저장했어요.");
+    showToast(data.resetSignals ? "입장 코드가 변경되어 현재 룸의 SIGNAL 기록과 회수 기록이 초기화됐어요." : "룸 설정을 저장했어요.");
     await loadDashboard(data.room.code);
   } catch (error) {
     showToast(error.message);
@@ -188,7 +196,8 @@ elements.createRoomForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({
         code: elements.newRoomCode.value,
         signalLimit: elements.newRoomSignalLimit.value,
-        openSignalLimit: elements.newRoomOpenSignalLimit.value
+        openSignalLimit: elements.newRoomOpenSignalLimit.value,
+        revokeLimit: elements.newRoomRevokeLimit.value
       })
     });
     elements.newRoomCode.value = "";
@@ -220,7 +229,8 @@ elements.adminUserList.addEventListener("submit", async (event) => {
         roomCode: state.roomCode,
         userId: card.dataset.user,
         addSignal: form.elements.addSignal.value,
-        addOpenSignal: form.elements.addOpenSignal.value
+        addOpenSignal: form.elements.addOpenSignal.value,
+        addRevoke: form.elements.addRevoke.value
       })
     });
     showToast("참가자의 SIGNAL 개수를 추가했어요.");

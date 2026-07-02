@@ -70,6 +70,25 @@ function saveCurrentUser() {
   }
 }
 
+function fillLoginFormFromUser(user = {}) {
+  elements.nickname.value = user.nickname || "";
+  elements.contact.value = user.contact || "";
+  elements.affiliation.value = user.affiliation || "";
+  elements.affiliationDetail.value = user.affiliationDetail || (!user.affiliation ? user.affiliationLabel || "" : "");
+  updateAffiliationInput();
+}
+
+function fallbackToLogin(message = "저장된 접속 정보가 만료됐어요. 비밀번호로 다시 입장해주세요.") {
+  const savedUser = state.user || loadSavedUserForCode(state.code) || {};
+  state.user = null;
+  state.people = [];
+  state.matches = [];
+  state.stats = null;
+  fillLoginFormFromUser(savedUser);
+  setView("login");
+  showToast(message);
+}
+
 function headerValue(value) {
   return encodeURIComponent(value);
 }
@@ -146,8 +165,10 @@ function renderStats() {
     receivedCount: 0,
     signalLimit: 10,
     openSignalLimit: 1,
+    revokeLimit: 3,
     signalRemaining: 10,
     openSignalRemaining: 1,
+    revokeRemaining: 3,
     receivedSignals: [],
     openSignals: []
   };
@@ -164,6 +185,10 @@ function renderStats() {
     <article class="stat-card">
       <span>OPEN SIGNAL</span>
       <strong>${stats.openSignalRemaining}/${stats.openSignalLimit}</strong>
+    </article>
+    <article class="stat-card">
+      <span>SIGNAL 회수권</span>
+      <strong>${stats.revokeRemaining}/${stats.revokeLimit}</strong>
     </article>
   `;
 }
@@ -194,7 +219,7 @@ function renderPeople() {
             <p class="affiliation-chip">${escapeHtml(person.affiliationLabel || "소속 미입력")}</p>
             ${
               isSynced
-                ? `<p class="contact-line">연락처: ${escapeHtml(match.contact)}</p>`
+                ? `<p class="contact-line sync-contact">연락처: ${escapeHtml(match.contact)}</p><p class="sync-help">지금 연락해서 서로의 SIGNAL을 이어보세요.</p>`
                 : `<p>마음이 가면 SIGNAL을 보내세요.</p>`
             }
           </div>
@@ -202,6 +227,11 @@ function renderPeople() {
             <button class="like-button ${person.signalSent ? "liked" : ""}" type="button" data-like="${person.id}" data-type="${SIGNAL}" ${person.signalSent || stats.signalRemaining <= 0 ? "disabled" : ""}>
               SIGNAL
             </button>
+            ${
+              person.signalSent
+                ? `<button class="like-button revoke" type="button" data-revoke="${person.id}" ${stats.revokeRemaining <= 0 ? "disabled" : ""}>SIGNAL 회수</button>`
+                : ""
+            }
             <button class="like-button open ${person.openSignalSent ? "open-sent" : ""}" type="button" data-like="${person.id}" data-type="${OPEN_SIGNAL}" ${person.openSignalSent || stats.openSignalRemaining <= 0 ? "disabled" : ""}>
               OPEN SIGNAL
             </button>
@@ -294,7 +324,7 @@ function escapeHtml(value) {
 async function loadPeople() {
   if (!state.code || !state.user?.id) return;
   const data = await request("/api/people");
-  state.user = data.user;
+  state.user = { ...(state.user || {}), ...data.user };
   state.room = data.room;
   state.people = data.people;
   state.matches = data.matches;
@@ -323,7 +353,13 @@ elements.gateForm.addEventListener("submit", async (event) => {
     setView(state.user?.id ? "home" : "login");
     setSection("home");
     if (state.user?.id) {
-      await loadPeople();
+      try {
+        await loadPeople();
+      } catch {
+        fallbackToLogin();
+      }
+    } else {
+      fillLoginFormFromUser(state.user || {});
     }
   } catch (error) {
     showToast(error.message);
@@ -349,7 +385,11 @@ elements.loginForm.addEventListener("submit", async (event) => {
         password: elements.password.value
       })
     });
-    state.user = data.user;
+    state.user = {
+      ...data.user,
+      affiliation: elements.affiliation.value,
+      affiliationDetail: elements.affiliationDetail.value
+    };
     state.room = data.room;
     state.matches = data.matches;
     state.stats = data.stats;
@@ -364,6 +404,25 @@ elements.loginForm.addEventListener("submit", async (event) => {
 });
 
 elements.peopleList.addEventListener("click", async (event) => {
+  const revokeButton = event.target.closest("[data-revoke]");
+  if (revokeButton) {
+    revokeButton.disabled = true;
+    try {
+      const data = await request("/api/likes/revoke", {
+        method: "POST",
+        body: JSON.stringify({ targetId: revokeButton.dataset.revoke })
+      });
+      state.matches = data.matches;
+      state.stats = data.stats;
+      showToast("SIGNAL을 회수했어요.");
+      await loadPeople();
+    } catch (error) {
+      revokeButton.disabled = false;
+      showToast(error.message);
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-like]");
   if (!button) return;
   const targetId = button.dataset.like;
@@ -428,7 +487,7 @@ async function boot() {
     state.user = loadSavedUserForCode(state.code);
   }
   if (state.user) {
-    elements.nickname.value = state.user.nickname || "";
+    fillLoginFormFromUser(state.user);
   }
 
   if (!state.code) {
@@ -445,11 +504,8 @@ async function boot() {
   setSection("home");
   try {
     await loadPeople();
-  } catch (error) {
-    localStorage.removeItem(userStorageKey());
-    state.user = null;
-    setView("login");
-    showToast("재입장을 위해 비밀번호를 입력해주세요.");
+  } catch {
+    fallbackToLogin();
   }
 }
 

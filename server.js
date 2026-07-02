@@ -26,7 +26,8 @@ const MIME_TYPES = {
 
 const DEFAULT_ROOM_SETTINGS = {
   signalLimit: 10,
-  openSignalLimit: 1
+  openSignalLimit: 1,
+  revokeLimit: 3
 };
 
 const DEFAULT_STORE = {
@@ -46,7 +47,8 @@ function createRoom(code, values = {}) {
       openSignalLimit: positiveInt(
         values.settings?.openSignalLimit,
         DEFAULT_ROOM_SETTINGS.openSignalLimit
-      )
+      ),
+      revokeLimit: positiveInt(values.settings?.revokeLimit, DEFAULT_ROOM_SETTINGS.revokeLimit)
     },
     users: Array.isArray(values.users) ? values.users : [],
     likes: Array.isArray(values.likes) ? values.likes : [],
@@ -100,6 +102,8 @@ function affiliationLabel(user) {
 function normalizeUser(user) {
   user.extraSignalLimit = positiveInt(user.extraSignalLimit, 0);
   user.extraOpenSignalLimit = positiveInt(user.extraOpenSignalLimit, 0);
+  user.extraRevokeLimit = positiveInt(user.extraRevokeLimit, 0);
+  user.revokesUsed = positiveInt(user.revokesUsed, 0);
   user.affiliation = AFFILIATIONS.has(user.affiliation) ? user.affiliation : "";
   user.affiliationDetail = cleanText(user.affiliationDetail, 80);
   return user;
@@ -127,7 +131,8 @@ function normalizeRoom(room) {
     openSignalLimit: positiveInt(
       room.settings?.openSignalLimit,
       DEFAULT_ROOM_SETTINGS.openSignalLimit
-    )
+    ),
+    revokeLimit: positiveInt(room.settings?.revokeLimit, DEFAULT_ROOM_SETTINGS.revokeLimit)
   };
   next.users = Array.isArray(room.users) ? room.users.map(normalizeUser) : [];
   next.likes = normalizeLikes(room.likes);
@@ -244,6 +249,7 @@ function roomSummary(room) {
     code: room.code,
     signalLimit: room.settings.signalLimit,
     openSignalLimit: room.settings.openSignalLimit,
+    revokeLimit: room.settings.revokeLimit,
     usersCount: room.users.length,
     likesCount: room.likes.length,
     updatedAt: room.updatedAt
@@ -257,11 +263,15 @@ function adminUser(room, user) {
     contact: user.contact,
     extraSignalLimit: user.extraSignalLimit,
     extraOpenSignalLimit: user.extraOpenSignalLimit,
+    extraRevokeLimit: user.extraRevokeLimit,
+    revokesUsed: user.revokesUsed,
     receivedCount: stats.receivedCount,
     signalLimit: stats.signalLimit,
     openSignalLimit: stats.openSignalLimit,
+    revokeLimit: stats.revokeLimit,
     signalRemaining: stats.signalRemaining,
-    openSignalRemaining: stats.openSignalRemaining
+    openSignalRemaining: stats.openSignalRemaining,
+    revokeRemaining: stats.revokeRemaining
   };
 }
 
@@ -316,10 +326,16 @@ function effectiveOpenSignalLimit(room, user) {
   return room.settings.openSignalLimit + positiveInt(user.extraOpenSignalLimit, 0);
 }
 
+function effectiveRevokeLimit(room, user) {
+  return room.settings.revokeLimit + positiveInt(user.extraRevokeLimit, 0);
+}
+
 function statsPayload(room, userId) {
   const user = room.users.find((entry) => entry.id === userId) || {};
   const signalLimit = effectiveSignalLimit(room, user);
   const openSignalLimit = effectiveOpenSignalLimit(room, user);
+  const revokeLimit = effectiveRevokeLimit(room, user);
+  const revokesUsed = positiveInt(user.revokesUsed, 0);
   const sentSignalCount = room.likes.filter(
     (like) => like.from === userId && like.type === SIGNAL
   ).length;
@@ -354,8 +370,11 @@ function statsPayload(room, userId) {
     sentOpenSignalCount,
     signalLimit,
     openSignalLimit,
+    revokeLimit,
+    revokesUsed,
     signalRemaining: Math.max(0, signalLimit - sentSignalCount),
     openSignalRemaining: Math.max(0, openSignalLimit - sentOpenSignalCount),
+    revokeRemaining: Math.max(0, revokeLimit - revokesUsed),
     receivedSignals,
     openSignals
   };
@@ -434,7 +453,8 @@ async function handleCreateRoom(req, res) {
   const room = createRoom(code, {
     settings: {
       signalLimit: body.signalLimit,
-      openSignalLimit: body.openSignalLimit
+      openSignalLimit: body.openSignalLimit,
+      revokeLimit: body.revokeLimit
     }
   });
   store.rooms.push(room);
@@ -451,6 +471,7 @@ async function handleAdminSettings(req, res) {
   const nextCode = cleanText(body.eventCode, 80);
   const signalLimit = positiveInt(body.signalLimit, DEFAULT_ROOM_SETTINGS.signalLimit);
   const openSignalLimit = positiveInt(body.openSignalLimit, DEFAULT_ROOM_SETTINGS.openSignalLimit);
+  const revokeLimit = positiveInt(body.revokeLimit, DEFAULT_ROOM_SETTINGS.revokeLimit);
   const newAdminKey = cleanText(body.newAdminKey, 120);
 
   if (!room) {
@@ -474,6 +495,7 @@ async function handleAdminSettings(req, res) {
   room.code = nextCode;
   room.settings.signalLimit = signalLimit;
   room.settings.openSignalLimit = openSignalLimit;
+  room.settings.revokeLimit = revokeLimit;
   if (newAdminKey) {
     store.settings.adminKeyHash = hashPassword(newAdminKey);
   }
@@ -482,6 +504,8 @@ async function handleAdminSettings(req, res) {
     room.users.forEach((user) => {
       user.extraSignalLimit = 0;
       user.extraOpenSignalLimit = 0;
+      user.extraRevokeLimit = 0;
+      user.revokesUsed = 0;
     });
   }
   room.updatedAt = new Date().toISOString();
@@ -504,6 +528,7 @@ async function handleGrant(req, res) {
   const userId = cleanText(body.userId, 80);
   const addSignal = positiveInt(body.addSignal, 0);
   const addOpenSignal = positiveInt(body.addOpenSignal, 0);
+  const addRevoke = positiveInt(body.addRevoke, 0);
 
   if (!room) {
     sendError(res, 404, "룸을 찾을 수 없습니다.");
@@ -517,6 +542,7 @@ async function handleGrant(req, res) {
 
   user.extraSignalLimit += addSignal;
   user.extraOpenSignalLimit += addOpenSignal;
+  user.extraRevokeLimit += addRevoke;
   room.updatedAt = new Date().toISOString();
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
@@ -560,6 +586,8 @@ async function handleSession(req, res, store, room) {
       affiliationDetail: affiliation.affiliationDetail,
       extraSignalLimit: 0,
       extraOpenSignalLimit: 0,
+      extraRevokeLimit: 0,
+      revokesUsed: 0,
       passwordHash: hashPassword(password),
       createdAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString()
@@ -670,6 +698,47 @@ async function handleLikes(req, res, store, room) {
   });
 }
 
+async function handleRevokeLike(req, res, store, room) {
+  const userId = cleanText(req.headers["x-user-id"], 80);
+  const body = await readBody(req);
+  const targetId = cleanText(body.targetId, 80);
+  const user = room.users.find((entry) => entry.id === userId);
+  const target = room.users.find((entry) => entry.id === targetId);
+
+  if (!user || !target || user.id === target.id) {
+    sendError(res, 400, "SIGNAL을 회수할 수 없습니다.");
+    return;
+  }
+
+  const stats = statsPayload(room, user.id);
+  if (stats.revokeRemaining <= 0) {
+    sendError(res, 400, "사용 가능한 SIGNAL 회수권이 없습니다.");
+    return;
+  }
+
+  const likeIndex = room.likes.findIndex(
+    (like) => like.from === user.id && like.to === target.id && like.type === SIGNAL
+  );
+  if (likeIndex === -1) {
+    sendError(res, 404, "회수할 SIGNAL을 찾을 수 없습니다.");
+    return;
+  }
+
+  room.likes.splice(likeIndex, 1);
+  user.revokesUsed = positiveInt(user.revokesUsed, 0) + 1;
+  room.updatedAt = new Date().toISOString();
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+
+  sendJson(res, 200, {
+    ok: true,
+    target: publicUser(target),
+    room: roomSummary(room),
+    stats: statsPayload(room, user.id),
+    matches: matchPayload(room, user.id)
+  });
+}
+
 async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/check-code") {
     const body = await readBody(req);
@@ -715,6 +784,10 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/likes") {
     await handleLikes(req, res, store, room);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/likes/revoke") {
+    await handleRevokeLike(req, res, store, room);
     return;
   }
 
