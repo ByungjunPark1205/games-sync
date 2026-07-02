@@ -30,6 +30,7 @@ const elements = {
   pendingRefreshButton: $("#pendingRefreshButton"),
   roomBackToCodeButton: $("#roomBackToCodeButton"),
   eventCode: $("#eventCode"),
+  gateError: $("#gateError"),
   nickname: $("#nickname"),
   affiliation: $("#affiliation"),
   affiliationDetailWrap: $("#affiliationDetailWrap"),
@@ -59,6 +60,11 @@ function showToast(message) {
   showToast.timer = window.setTimeout(() => {
     elements.toast.classList.add("hidden");
   }, 3200);
+}
+
+function showGateError(message = "") {
+  elements.gateError.textContent = message;
+  elements.gateError.classList.toggle("hidden", !message);
 }
 
 function userStorageKey(code = state.code) {
@@ -163,6 +169,7 @@ function returnToGate() {
   state.matches = [];
   state.stats = null;
   elements.eventCode.value = "";
+  showGateError();
   setView("gate");
 }
 
@@ -380,6 +387,7 @@ async function loadPeople() {
 }
 
 elements.affiliation.addEventListener("change", updateAffiliationInput);
+elements.eventCode.addEventListener("input", () => showGateError());
 elements.backToCodeButton.addEventListener("click", returnToGate);
 elements.pendingBackToCodeButton.addEventListener("click", returnToGate);
 elements.pendingRefreshButton.addEventListener("click", () => checkApprovalStatus());
@@ -388,6 +396,7 @@ elements.roomBackToCodeButton.addEventListener("click", returnToGate);
 elements.gateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const code = elements.eventCode.value.trim();
+  showGateError();
   try {
     const data = await request("/api/check-code", {
       method: "POST",
@@ -402,7 +411,7 @@ elements.gateForm.addEventListener("submit", async (event) => {
     setView("login");
     setSection("home");
   } catch (error) {
-    showToast(error.message);
+    showGateError(error.message);
   }
 });
 

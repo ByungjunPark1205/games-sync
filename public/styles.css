@@ -371,6 +371,15 @@ h2 {
   gap: 14px;
 }
 
+.gate-error {
+  margin: -4px 0 0;
+  color: #ff6b8a;
+  font-size: 0.9rem;
+  font-weight: 850;
+  line-height: 1.45;
+  text-align: center;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -1223,7 +1232,7 @@ dialog::backdrop {
   padding: 14px 16px;
   border: 1px solid rgba(91, 156, 255, 0.42);
   border-radius: 14px;
-  background: rgba(5, 10, 20, 0.15);
+  background: rgba(5, 10, 20, 0.2);
   color: rgba(232, 236, 243, 0.95);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
   font-size: 1.04rem;
