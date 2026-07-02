@@ -50,19 +50,33 @@
             <span>닉네임</span>
             <input id="nickname" name="nickname" autocomplete="nickname" placeholder="입장 때 걸 닉네임" maxlength="32" required />
           </label>
-          <label>
-            <span>소속</span>
-            <select id="affiliation" name="affiliation">
-              <option value="">직접 입력 / 지인</option>
-              <option value="Games">Games</option>
-              <option value="동물원">동물원</option>
-              <option value="수녀원">수녀원</option>
-            </select>
-          </label>
-          <label id="affiliationDetailWrap">
-            <span>어떤 소속의 누구 지인인가요?</span>
-            <input id="affiliationDetail" name="affiliationDetail" autocomplete="off" placeholder="예: Games 민호 지인" maxlength="80" />
-          </label>
+          <fieldset class="tag-fieldset">
+            <legend>성향 태그</legend>
+            <div class="tag-options">
+              <label><input type="checkbox" name="roleTags" value="탑" /><span>탑</span></label>
+              <label><input type="checkbox" name="roleTags" value="올탑" /><span>올탑</span></label>
+              <label><input type="checkbox" name="roleTags" value="올" /><span>올</span></label>
+              <label><input type="checkbox" name="roleTags" value="올바텀" /><span>올바텀</span></label>
+              <label><input type="checkbox" name="roleTags" value="바텀" /><span>바텀</span></label>
+              <label><input type="checkbox" name="roleTags" value="비선호" /><span>비선호</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="tag-fieldset">
+            <legend>소속 태그</legend>
+            <div class="tag-options">
+              <label><input type="checkbox" name="groupTags" value="Games" /><span>Games</span></label>
+              <label><input type="checkbox" name="groupTags" value="동물원" /><span>동물원</span></label>
+              <label><input type="checkbox" name="groupTags" value="수녀원" /><span>수녀원</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="tag-fieldset">
+            <legend>찾는 관계</legend>
+            <div class="tag-options">
+              <label><input type="checkbox" name="seekingTags" value="연애만" /><span>연애만</span></label>
+              <label><input type="checkbox" name="seekingTags" value="친분만" /><span>친분만</span></label>
+              <label><input type="checkbox" name="seekingTags" value="아무나환영" /><span>아무나환영</span></label>
+            </div>
+          </fieldset>
           <label>
             <span>연락처</span>
             <input id="contact" name="contact" autocomplete="off" placeholder="인스타 아이디 혹은 전화번호" maxlength="80" required />
@@ -104,7 +118,7 @@
             <h3 id="profileNickname">-</h3>
             <dl class="profile-details">
               <div>
-                <dt>소속</dt>
+                <dt>태그</dt>
                 <dd id="profileAffiliation">-</dd>
               </div>
               <div>
@@ -149,9 +163,21 @@
           <div class="timeline-list" id="notificationList"></div>
         </section>
 
-        <nav class="bottom-nav three-nav" aria-label="주요 메뉴">
+        <section class="hidden ranking-view" id="rankingView" aria-labelledby="ranking-title">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Room Ranking</p>
+              <h2 id="ranking-title">SIGNAL 순위</h2>
+            </div>
+            <button class="ghost-button refresh-button" id="rankingRefreshButton" type="button">새로고침</button>
+          </div>
+          <div class="ranking-list" id="rankingList"></div>
+        </section>
+
+        <nav class="bottom-nav" aria-label="주요 메뉴">
           <button class="nav-item" id="profileNav" type="button">내정보</button>
           <button class="nav-item active" id="homeNav" type="button">홈</button>
+          <button class="nav-item" id="rankingNav" type="button">순위</button>
           <button class="nav-item" id="alertsNav" type="button">알림</button>
         </nav>
       </section>

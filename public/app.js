@@ -7,6 +7,7 @@ const state = {
   room: null,
   people: [],
   matches: [],
+  rankings: [],
   stats: null,
   section: "home"
 };
@@ -23,6 +24,7 @@ const elements = {
   profileView: $("#profileView"),
   homeContent: $("#homeContent"),
   notificationsView: $("#notificationsView"),
+  rankingView: $("#rankingView"),
   gateForm: $("#gateForm"),
   loginForm: $("#loginForm"),
   backToCodeButton: $("#backToCodeButton"),
@@ -32,14 +34,13 @@ const elements = {
   eventCode: $("#eventCode"),
   gateError: $("#gateError"),
   nickname: $("#nickname"),
-  affiliation: $("#affiliation"),
-  affiliationDetailWrap: $("#affiliationDetailWrap"),
-  affiliationDetail: $("#affiliationDetail"),
+  tagInputs: Array.from(document.querySelectorAll("input[name='roleTags'], input[name='groupTags'], input[name='seekingTags']")),
   contact: $("#contact"),
   password: $("#password"),
   statsPanel: $("#statsPanel"),
   peopleList: $("#peopleList"),
   notificationList: $("#notificationList"),
+  rankingList: $("#rankingList"),
   profileNickname: $("#profileNickname"),
   profileAffiliation: $("#profileAffiliation"),
   profileContact: $("#profileContact"),
@@ -47,8 +48,10 @@ const elements = {
   refreshButton: $("#refreshButton"),
   profileRefreshButton: $("#profileRefreshButton"),
   notificationRefreshButton: $("#notificationRefreshButton"),
+  rankingRefreshButton: $("#rankingRefreshButton"),
   profileNav: $("#profileNav"),
   homeNav: $("#homeNav"),
+  rankingNav: $("#rankingNav"),
   alertsNav: $("#alertsNav"),
   toast: $("#toast")
 };
@@ -81,12 +84,41 @@ function saveCurrentUser() {
   }
 }
 
+function emptyTags() {
+  return { roles: [], groups: [], seeking: [] };
+}
+
+function getSelectedTags() {
+  return elements.tagInputs.reduce((tags, input) => {
+    if (!input.checked) return tags;
+    if (input.name === "roleTags") tags.roles.push(input.value);
+    if (input.name === "groupTags") tags.groups.push(input.value);
+    if (input.name === "seekingTags") tags.seeking.push(input.value);
+    return tags;
+  }, emptyTags());
+}
+
+function setSelectedTags(tags = emptyTags()) {
+  elements.tagInputs.forEach((input) => {
+    const key =
+      input.name === "roleTags" ? "roles" : input.name === "groupTags" ? "groups" : "seeking";
+    input.checked = Array.isArray(tags[key]) && tags[key].includes(input.value);
+  });
+}
+
+function tagsText(tags = emptyTags()) {
+  const labels = [...(tags.roles || []), ...(tags.groups || []), ...(tags.seeking || [])];
+  return labels.length ? labels.join(" · ") : "태그 미선택";
+}
+
 function fillLoginFormFromUser(user = {}) {
   elements.nickname.value = user.nickname || "";
   elements.contact.value = user.contact || "";
-  elements.affiliation.value = user.affiliation || "";
-  elements.affiliationDetail.value = user.affiliationDetail || (!user.affiliation ? user.affiliationLabel || "" : "");
-  updateAffiliationInput();
+  const savedTags = user.tags || emptyTags();
+  if ((!savedTags.groups || !savedTags.groups.length) && user.affiliation) {
+    savedTags.groups = [user.affiliation];
+  }
+  setSelectedTags(savedTags);
 }
 
 function fallbackToLogin(message = "저장된 접속 정보가 만료됐어요. 비밀번호로 다시 입장해주세요.") {
@@ -94,6 +126,7 @@ function fallbackToLogin(message = "저장된 접속 정보가 만료됐어요. 
   state.user = null;
   state.people = [];
   state.matches = [];
+  state.rankings = [];
   state.stats = null;
   fillLoginFormFromUser(savedUser);
   setView("login");
@@ -167,16 +200,11 @@ function returnToGate() {
   state.room = null;
   state.people = [];
   state.matches = [];
+  state.rankings = [];
   state.stats = null;
   elements.eventCode.value = "";
   showGateError();
   setView("gate");
-}
-
-function updateAffiliationInput() {
-  const needsDetail = !elements.affiliation.value;
-  elements.affiliationDetailWrap.classList.toggle("hidden", !needsDetail);
-  elements.affiliationDetail.required = needsDetail;
 }
 
 function setSection(section) {
@@ -184,22 +212,26 @@ function setSection(section) {
   const profileActive = section === "profile";
   const alertsActive = section === "alerts";
   const homeActive = section === "home";
+  const rankingActive = section === "ranking";
 
   elements.profileView.classList.toggle("hidden", !profileActive);
   elements.homeContent.classList.toggle("hidden", !homeActive);
   elements.notificationsView.classList.toggle("hidden", !alertsActive);
+  elements.rankingView.classList.toggle("hidden", !rankingActive);
   elements.profileNav.classList.toggle("active", profileActive);
   elements.homeNav.classList.toggle("active", homeActive);
+  elements.rankingNav.classList.toggle("active", rankingActive);
   elements.alertsNav.classList.toggle("active", alertsActive);
 
   if (profileActive) renderProfile();
   if (alertsActive) renderNotifications();
+  if (rankingActive) renderRankings();
 }
 
 function renderProfile() {
   const user = state.user || {};
   elements.profileNickname.textContent = user.nickname || "-";
-  elements.profileAffiliation.textContent = user.affiliationLabel || "소속 미입력";
+  elements.profileAffiliation.textContent = tagsText(user.tags);
   elements.profileContact.textContent = user.contact ? `연락처: ${user.contact}` : "연락처: -";
   elements.profileCode.textContent = state.code || "-";
 }
@@ -260,7 +292,7 @@ function renderPeople() {
         <article class="person-card ${isSynced ? "match-card" : ""}">
           <div>
             <h3>${escapeHtml(person.nickname)}</h3>
-            <p class="affiliation-chip">${escapeHtml(person.affiliationLabel || "소속 미입력")}</p>
+            <p class="affiliation-chip">${escapeHtml(tagsText(person.tags))}</p>
             ${
               isSynced
                 ? `<div class="sync-contact-callout" aria-label="SYNC 연락처 안내">
@@ -300,6 +332,7 @@ function notificationItems() {
     type: "signal",
     title: "새로운 SIGNAL을 받았어요.",
     time: signal.sentAt,
+    priority: 1,
     body: "누군가 마음을 보냈어요.",
     note: ""
   }));
@@ -308,6 +341,7 @@ function notificationItems() {
     type: "open",
     title: `${person.nickname}님이 OPEN SIGNAL을 보냈어요.`,
     time: person.sentAt,
+    priority: 2,
     body: `연락처: ${person.contact}`,
     note: person.note || ""
   }));
@@ -316,11 +350,15 @@ function notificationItems() {
     type: "sync",
     title: `${match.nickname}님과 SYNC됐어요.`,
     time: match.matchedAt,
+    priority: 3,
     body: `연락처: ${match.contact}`,
     note: "두 사람의 SIGNAL이 SYNC됐어요."
   }));
 
-  return [...signalItems, ...openItems, ...syncItems].sort((a, b) => new Date(b.time) - new Date(a.time));
+  return [...signalItems, ...openItems, ...syncItems].sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return new Date(b.time) - new Date(a.time);
+  });
 }
 
 function renderNotifications() {
@@ -347,11 +385,35 @@ function renderNotifications() {
     .join("");
 }
 
+function renderRankings() {
+  const rankings = state.rankings || [];
+  if (!rankings.length) {
+    elements.rankingList.innerHTML = `<div class="empty-state">아직 SIGNAL 순위가 없어요. SIGNAL을 받으면 1위부터 3위까지 표시됩니다.</div>`;
+    return;
+  }
+
+  elements.rankingList.innerHTML = rankings
+    .map(
+      (person) => `
+        <article class="ranking-card rank-${person.rank}">
+          <div class="rank-badge">${person.rank}</div>
+          <div>
+            <h3>${escapeHtml(person.nickname)}</h3>
+            <p class="affiliation-chip">${escapeHtml(tagsText(person.tags))}</p>
+          </div>
+          <strong>${person.receivedCount}</strong>
+        </article>
+      `
+    )
+    .join("");
+}
+
 function render() {
   renderProfile();
   renderStats();
   renderPeople();
   renderNotifications();
+  renderRankings();
 }
 
 function formatTime(value) {
@@ -381,12 +443,12 @@ async function loadPeople() {
   state.room = data.room;
   state.people = data.people;
   state.matches = data.matches;
+  state.rankings = data.rankings || [];
   state.stats = data.stats;
   saveCurrentUser();
   render();
 }
 
-elements.affiliation.addEventListener("change", updateAffiliationInput);
 elements.eventCode.addEventListener("input", () => showGateError());
 elements.backToCodeButton.addEventListener("click", returnToGate);
 elements.pendingBackToCodeButton.addEventListener("click", returnToGate);
@@ -417,30 +479,24 @@ elements.gateForm.addEventListener("submit", async (event) => {
 
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!elements.affiliation.value && !elements.affiliationDetail.value.trim()) {
-    showToast("소속을 선택하거나 어떤 소속의 누구 지인인지 적어주세요.");
-    elements.affiliationDetail.focus();
-    return;
-  }
 
   try {
     const data = await request("/api/session", {
       method: "POST",
       body: JSON.stringify({
         nickname: elements.nickname.value,
-        affiliation: elements.affiliation.value,
-        affiliationDetail: elements.affiliationDetail.value,
+        tags: getSelectedTags(),
         contact: elements.contact.value,
         password: elements.password.value
       })
     });
     state.user = {
       ...data.user,
-      affiliation: elements.affiliation.value,
-      affiliationDetail: elements.affiliationDetail.value
+      tags: getSelectedTags()
     };
     state.room = data.room;
     state.matches = data.matches;
+    state.rankings = data.rankings || [];
     state.stats = data.stats;
     saveCurrentUser();
     if (data.pending || state.user.status === "pending") {
@@ -515,8 +571,14 @@ elements.homeNav.addEventListener("click", () => {
   setSection("home");
 });
 
-elements.alertsNav.addEventListener("click", () => {
+elements.rankingNav.addEventListener("click", async () => {
+  setSection("ranking");
+  await refreshCurrentState();
+});
+
+elements.alertsNav.addEventListener("click", async () => {
   setSection("alerts");
+  await refreshCurrentState();
 });
 
 async function refreshCurrentState() {
@@ -530,9 +592,9 @@ async function refreshCurrentState() {
 elements.refreshButton.addEventListener("click", refreshCurrentState);
 elements.profileRefreshButton.addEventListener("click", refreshCurrentState);
 elements.notificationRefreshButton.addEventListener("click", refreshCurrentState);
+elements.rankingRefreshButton.addEventListener("click", refreshCurrentState);
 
 async function boot() {
-  updateAffiliationInput();
   let savedUser = null;
   if (state.code) {
     elements.eventCode.value = state.code;

@@ -9,7 +9,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY || "games-admin";
 const DATABASE_PATH =
   process.env.DATABASE_PATH || process.env.STORE_PATH || path.join(__dirname, "data", "games-sync.localdb");
 const LEGACY_STORE_PATH = process.env.LEGACY_STORE_PATH || "";
-const DATA_KEY_PATH = process.env.DATA_KEY_PATH || path.join(__dirname, "data", "encryption.key");
+const DATA_KEY_PATH = process.env.DATA_KEY_PATH || path.join(path.dirname(DATABASE_PATH), "encryption.key");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATABASE_ALGORITHM = "aes-256-gcm";
 
@@ -18,6 +18,11 @@ const OPEN_SIGNAL = "open";
 const USER_STATUS_PENDING = "pending";
 const USER_STATUS_APPROVED = "approved";
 const AFFILIATIONS = new Set(["Games", "동물원", "수녀원"]);
+const TAG_OPTIONS = {
+  roles: ["탑", "올탑", "올", "올바텀", "바텀", "비선호"],
+  groups: ["Games", "동물원", "수녀원"],
+  seeking: ["연애만", "친분만", "아무나환영"]
+};
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -99,7 +104,35 @@ function verifyPassword(password, storedHash) {
   return stored.length === candidate.length && crypto.timingSafeEqual(stored, candidate);
 }
 
+function normalizeTagList(values, allowedValues) {
+  const allowed = new Set(allowedValues);
+  return Array.isArray(values)
+    ? [...new Set(values.map((value) => cleanText(value, 24)).filter((value) => allowed.has(value)))]
+    : [];
+}
+
+function normalizeTags(tags = {}, user = {}) {
+  const next = {
+    roles: normalizeTagList(tags.roles, TAG_OPTIONS.roles),
+    groups: normalizeTagList(tags.groups, TAG_OPTIONS.groups),
+    seeking: normalizeTagList(tags.seeking, TAG_OPTIONS.seeking)
+  };
+
+  if (!next.groups.length && AFFILIATIONS.has(user.affiliation)) {
+    next.groups = [user.affiliation];
+  }
+
+  return next;
+}
+
+function tagLabel(user) {
+  const tags = normalizeTags(user.tags, user);
+  const labels = [...tags.roles, ...tags.groups, ...tags.seeking];
+  return labels.length ? labels.join(" · ") : "태그 미선택";
+}
+
 function affiliationLabel(user) {
+  if (user.tags) return tagLabel(user);
   if (AFFILIATIONS.has(user.affiliation)) return user.affiliation;
   if (user.affiliationDetail) return user.affiliationDetail;
   return "소속 미입력";
@@ -111,6 +144,7 @@ function normalizeUser(user) {
   user.extraRevokeLimit = positiveInt(user.extraRevokeLimit, 0);
   user.revokesUsed = positiveInt(user.revokesUsed, 0);
   user.status = user.status === USER_STATUS_PENDING ? USER_STATUS_PENDING : USER_STATUS_APPROVED;
+  user.tags = normalizeTags(user.tags, user);
   user.affiliation = AFFILIATIONS.has(user.affiliation) ? user.affiliation : "";
   user.affiliationDetail = cleanText(user.affiliationDetail, 80);
   return user;
@@ -399,6 +433,7 @@ function publicUser(user) {
     id: user.id,
     nickname: user.nickname,
     affiliationLabel: affiliationLabel(user),
+    tags: normalizeTags(user.tags, user),
     status: user.status,
     createdAt: user.createdAt
   };
@@ -422,6 +457,30 @@ function roomSummary(room) {
     likesCount: room.likes.length,
     updatedAt: room.updatedAt
   };
+}
+
+function receivedSignalCount(room, userId) {
+  return new Set(
+    room.likes
+      .filter((like) => like.to === userId && like.type === SIGNAL)
+      .map((like) => like.from)
+  ).size;
+}
+
+function rankingPayload(room) {
+  return room.users
+    .filter(isApprovedUser)
+    .map((user) => ({
+      ...publicUser(user),
+      receivedCount: receivedSignalCount(room, user.id)
+    }))
+    .filter((user) => user.receivedCount > 0)
+    .sort((a, b) => b.receivedCount - a.receivedCount || a.nickname.localeCompare(b.nickname))
+    .slice(0, 3)
+    .map((user, index) => ({
+      ...user,
+      rank: index + 1
+    }));
 }
 
 function adminUser(room, user) {
@@ -517,9 +576,7 @@ function statsPayload(room, userId) {
   const sentOpenSignalCount = room.likes.filter(
     (like) => like.from === userId && like.type === OPEN_SIGNAL
   ).length;
-  const receivedCount = new Set(
-    room.likes.filter((like) => like.to === userId).map((like) => like.from)
-  ).size;
+  const receivedCount = receivedSignalCount(room, userId);
   const receivedSignals = room.likes
     .filter((like) => like.to === userId && like.type === SIGNAL)
     .map((like) => ({
@@ -555,16 +612,8 @@ function statsPayload(room, userId) {
   };
 }
 
-function parseAffiliation(body) {
-  const affiliation = cleanText(body.affiliation, 24);
-  const affiliationDetail = cleanText(body.affiliationDetail, 80);
-  if (AFFILIATIONS.has(affiliation)) {
-    return { affiliation, affiliationDetail: "" };
-  }
-  if (!affiliationDetail) {
-    return null;
-  }
-  return { affiliation: "", affiliationDetail };
+function parseTags(body) {
+  return normalizeTags(body.tags || {});
 }
 
 function findRoom(store, code) {
@@ -756,14 +805,10 @@ async function handleSession(req, res, store, room) {
   const contact = cleanText(body.contact, 80);
   const password = cleanText(body.password, 120);
   const normalized = normalizeNickname(nickname);
-  const affiliation = parseAffiliation(body);
+  const tags = parseTags(body);
 
   if (!nickname || !contact || password.length < 4) {
     sendError(res, 400, "닉네임, 연락처, 4자 이상의 비밀번호를 입력해주세요.");
-    return;
-  }
-  if (!affiliation) {
-    sendError(res, 400, "소속을 선택하거나 어떤 소속의 누구 지인인지 적어주세요.");
     return;
   }
 
@@ -774,8 +819,9 @@ async function handleSession(req, res, store, room) {
       return;
     }
     user.contact = contact;
-    user.affiliation = affiliation.affiliation;
-    user.affiliationDetail = affiliation.affiliationDetail;
+    user.tags = tags;
+    user.affiliation = tags.groups[0] || "";
+    user.affiliationDetail = "";
     user.lastSeenAt = new Date().toISOString();
   } else {
     user = {
@@ -783,8 +829,9 @@ async function handleSession(req, res, store, room) {
       nickname,
       normalizedNickname: normalized,
       contact,
-      affiliation: affiliation.affiliation,
-      affiliationDetail: affiliation.affiliationDetail,
+      tags,
+      affiliation: tags.groups[0] || "",
+      affiliationDetail: "",
       extraSignalLimit: 0,
       extraOpenSignalLimit: 0,
       extraRevokeLimit: 0,
@@ -806,7 +853,8 @@ async function handleSession(req, res, store, room) {
       user: privateUser(user),
       room: roomSummary(room),
       stats: null,
-      matches: []
+      matches: [],
+      rankings: rankingPayload(room)
     });
     return;
   }
@@ -815,7 +863,8 @@ async function handleSession(req, res, store, room) {
     user: privateUser(user),
     room: roomSummary(room),
     stats: statsPayload(room, user.id),
-    matches: matchPayload(room, user.id)
+    matches: matchPayload(room, user.id),
+    rankings: rankingPayload(room)
   });
 }
 
@@ -840,7 +889,8 @@ function peoplePayload(room, user) {
     room: roomSummary(room),
     people,
     stats: statsPayload(room, user.id),
-    matches
+    matches,
+    rankings: rankingPayload(room)
   };
 }
 
