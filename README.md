@@ -65,7 +65,7 @@ Recommended settings:
 - Build Command: `npm install`
 - Start Command: `npm start`
 - Environment variable `ADMIN_KEY`: set this to a private admin password
-- Environment variable `DATA_ENCRYPTION_KEY`: set this to a long private secret
+- Environment variable `DATA_ENCRYPTION_KEY`: set this to a long private secret and never change it after data exists
 - Environment variable `UPSTASH_REDIS_REST_URL`: recommended on free Render services
 - Environment variable `UPSTASH_REDIS_REST_TOKEN`: recommended on free Render services
 - Environment variable `UPSTASH_STORE_KEY`: optional, defaults to `games-sync:store`
@@ -77,6 +77,8 @@ Render services use an ephemeral filesystem by default, so a persistent disk or 
 On free Render services, use Upstash Redis instead of Render Disk. When both `UPSTASH_REDIS_REST_URL` and
 `UPSTASH_REDIS_REST_TOKEN` are set, the app stores its encrypted database payload in Upstash under
 `UPSTASH_STORE_KEY` and ignores the local file database for normal reads and writes.
+`DATA_ENCRYPTION_KEY` is required with Upstash on Render because the encrypted payload must be decryptable after
+every restart.
 
 If you use the local file database, the
 database file is missing in production, the app refuses to create a fresh empty database unless

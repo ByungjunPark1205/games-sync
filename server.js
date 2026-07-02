@@ -10,6 +10,7 @@ const DATABASE_PATH =
   process.env.DATABASE_PATH || process.env.STORE_PATH || path.join(__dirname, "data", "games-sync.localdb");
 const LEGACY_STORE_PATH = process.env.LEGACY_STORE_PATH || "";
 const DATA_KEY_PATH = process.env.DATA_KEY_PATH || path.join(path.dirname(DATABASE_PATH), "encryption.key");
+const HAS_CONFIGURED_DATA_KEY = Boolean(process.env.DATA_ENCRYPTION_KEY || process.env.DB_ENCRYPTION_KEY);
 const HAS_EXPLICIT_DATABASE_PATH = Boolean(process.env.DATABASE_PATH || process.env.STORE_PATH);
 const IS_RENDER = process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
 const ALLOW_DATABASE_BOOTSTRAP =
@@ -255,12 +256,14 @@ function decodeConfiguredKey(value) {
 async function dataKey() {
   if (cachedDataKey) return cachedDataKey;
 
-  const configuredKey = decodeConfiguredKey(
-    process.env.DATA_ENCRYPTION_KEY || process.env.DB_ENCRYPTION_KEY
-  );
+  const configuredKey = decodeConfiguredKey(process.env.DATA_ENCRYPTION_KEY || process.env.DB_ENCRYPTION_KEY);
   if (configuredKey) {
     cachedDataKey = configuredKey;
     return cachedDataKey;
+  }
+
+  if (USE_UPSTASH_STORE && IS_RENDER) {
+    throw new Error("DATA_ENCRYPTION_KEY is required when using Upstash Redis on Render.");
   }
 
   try {
@@ -820,7 +823,7 @@ function storagePayload() {
   return {
     provider: USE_UPSTASH_STORE ? "upstash" : "file",
     databasePath: USE_UPSTASH_STORE ? `upstash:${UPSTASH_STORE_KEY}` : DATABASE_PATH,
-    dataKeyPath: process.env.DATA_ENCRYPTION_KEY || process.env.DB_ENCRYPTION_KEY ? "environment secret" : DATA_KEY_PATH,
+    dataKeyPath: HAS_CONFIGURED_DATA_KEY ? "environment secret" : DATA_KEY_PATH,
     backupDir: USE_UPSTASH_STORE ? "upstash managed storage" : DATABASE_BACKUP_DIR,
     allowDatabaseBootstrap: ALLOW_DATABASE_BOOTSTRAP,
     isRender: IS_RENDER
