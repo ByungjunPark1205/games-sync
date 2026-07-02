@@ -56,6 +56,14 @@ const DEFAULT_STORE = {
   updatedAt: new Date().toISOString()
 };
 
+class DatabaseMissingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "DatabaseMissingError";
+    this.code = "DATABASE_MISSING";
+  }
+}
+
 function createRoom(code, values = {}) {
   return {
     id: values.id || crypto.randomUUID(),
@@ -418,7 +426,9 @@ async function richerLegacyStore(currentStore) {
   return null;
 }
 
-async function readStore() {
+async function readStore(options = {}) {
+  const allowBootstrap = options.allowBootstrap === true || ALLOW_DATABASE_BOOTSTRAP;
+
   try {
     const result = await readStoreFile(DATABASE_PATH);
     if (!result.encrypted) {
@@ -450,8 +460,8 @@ async function readStore() {
     }
   }
 
-  if (!ALLOW_DATABASE_BOOTSTRAP) {
-    throw new Error(
+  if (!allowBootstrap) {
+    throw new DatabaseMissingError(
       `Database file is missing at ${DATABASE_PATH}. Refusing to create a fresh empty database. ` +
         "Attach a persistent disk to this path, restore a backup, or set ALLOW_DATABASE_BOOTSTRAP=true once for first setup."
     );
@@ -704,7 +714,16 @@ function findRoom(store, code) {
 }
 
 async function requireRoom(req, res) {
-  const store = await readStore();
+  let store;
+  try {
+    store = await readStore();
+  } catch (error) {
+    if (error instanceof DatabaseMissingError) {
+      sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. 관리자에게 문의해주세요.");
+      return null;
+    }
+    throw error;
+  }
   const code = cleanHeaderText(req.headers["x-event-code"], 80);
   const room = findRoom(store, code);
   if (!room) {
@@ -715,10 +734,19 @@ async function requireRoom(req, res) {
 }
 
 async function requireAdmin(req, res) {
-  const store = await readStore();
   const key = cleanHeaderText(req.headers["x-admin-key"], 120);
-  const isSavedKey = store.settings.adminKeyHash && verifyPassword(key, store.settings.adminKeyHash);
   const isEnvironmentKey = ADMIN_KEY && key === ADMIN_KEY;
+  let store;
+  try {
+    store = await readStore({ allowBootstrap: isEnvironmentKey });
+  } catch (error) {
+    if (error instanceof DatabaseMissingError) {
+      sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. Render의 ADMIN_KEY로 다시 접속해주세요.");
+      return null;
+    }
+    throw error;
+  }
+  const isSavedKey = store.settings.adminKeyHash && verifyPassword(key, store.settings.adminKeyHash);
   if (!isSavedKey && !isEnvironmentKey) {
     sendError(res, 401, "관리자 코드가 올바르지 않습니다.");
     return null;
@@ -1220,6 +1248,10 @@ const server = http.createServer(async (req, res) => {
     await serveStatic(req, res, url);
   } catch (error) {
     console.error(error);
+    if (error instanceof DatabaseMissingError) {
+      sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. 관리자에게 문의해주세요.");
+      return;
+    }
     sendError(res, 500, "서버 오류가 발생했습니다.");
   }
 });
