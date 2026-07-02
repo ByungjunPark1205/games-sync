@@ -39,12 +39,16 @@ function showToast(message) {
   }, 3200);
 }
 
+function headerValue(value) {
+  return encodeURIComponent(value);
+}
+
 async function adminRequest(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
       "content-type": "application/json",
-      "x-admin-key": state.adminKey,
+      "x-admin-key": headerValue(state.adminKey),
       ...(options.headers || {})
     }
   });

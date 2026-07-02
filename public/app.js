@@ -72,12 +72,16 @@ function saveCurrentUser() {
   }
 }
 
+function headerValue(value) {
+  return encodeURIComponent(value);
+}
+
 async function request(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
       "content-type": "application/json",
-      ...(state.code ? { "x-event-code": state.code } : {}),
+      ...(state.code ? { "x-event-code": headerValue(state.code) } : {}),
       ...(state.user?.id ? { "x-user-id": state.user.id } : {}),
       ...(options.headers || {})
     }

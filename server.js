@@ -58,6 +58,15 @@ function cleanText(value, maxLength) {
   return String(value || "").trim().slice(0, maxLength);
 }
 
+function cleanHeaderText(value, maxLength) {
+  const text = String(value || "");
+  try {
+    return cleanText(decodeURIComponent(text), maxLength);
+  } catch {
+    return cleanText(text, maxLength);
+  }
+}
+
 function positiveInt(value, fallback) {
   const number = Number.parseInt(value, 10);
   if (!Number.isFinite(number) || number < 0) return fallback;
@@ -347,7 +356,7 @@ function findRoom(store, code) {
 
 async function requireRoom(req, res) {
   const store = await readStore();
-  const code = cleanText(req.headers["x-event-code"], 80);
+  const code = cleanHeaderText(req.headers["x-event-code"], 80);
   const room = findRoom(store, code);
   if (!room) {
     sendError(res, 403, "입장 코드가 올바르지 않습니다.");
@@ -358,7 +367,7 @@ async function requireRoom(req, res) {
 
 async function requireAdmin(req, res) {
   const store = await readStore();
-  const key = cleanText(req.headers["x-admin-key"], 120);
+  const key = cleanHeaderText(req.headers["x-admin-key"], 120);
   const isSavedKey = store.settings.adminKeyHash && verifyPassword(key, store.settings.adminKeyHash);
   const isBootstrapKey = !store.settings.adminKeyHash && key === ADMIN_KEY;
   if (!isSavedKey && !isBootstrapKey) {
