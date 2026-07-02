@@ -17,6 +17,7 @@ const elements = {
   createRoomForm: $("#createRoomForm"),
   adminKey: $("#adminKey"),
   roomSelect: $("#roomSelect"),
+  adminStorageStatus: $("#adminStorageStatus"),
   adminEventCode: $("#adminEventCode"),
   adminSignalLimit: $("#adminSignalLimit"),
   adminOpenSignalLimit: $("#adminOpenSignalLimit"),
@@ -132,6 +133,17 @@ function renderUsers() {
     .join("");
 }
 
+function renderStorage() {
+  if (!state.storage) {
+    elements.adminStorageStatus.textContent = "";
+    return;
+  }
+
+  elements.adminStorageStatus.textContent =
+    `DB: ${state.storage.databasePath} · 백업: ${state.storage.backupDir} · ` +
+    `자동 초기화 ${state.storage.allowDatabaseBootstrap ? "켜짐" : "꺼짐"}`;
+}
+
 function applyRoom(room) {
   if (!room) return;
   state.roomCode = room.code;
@@ -145,10 +157,12 @@ async function loadDashboard(roomCode = state.roomCode) {
   const query = roomCode ? `?roomCode=${encodeURIComponent(roomCode)}` : "";
   const data = await adminRequest(`/api/admin/status${query}`);
   state.rooms = data.rooms;
+  state.storage = data.storage;
   applyRoom(data.room || data.rooms[0]);
   state.users = data.users;
   renderRooms();
   renderUsers();
+  renderStorage();
   setDashboardVisible(true);
 }
 

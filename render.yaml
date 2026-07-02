@@ -13,6 +13,8 @@ services:
         sync: false
       - key: DATABASE_PATH
         value: /var/data/games-sync.localdb
+      - key: ALLOW_DATABASE_BOOTSTRAP
+        value: false
     disk:
       name: games-sync-data
       mountPath: /var/data

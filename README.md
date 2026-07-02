@@ -67,6 +67,15 @@ Recommended settings:
 - Environment variable `ADMIN_KEY`: set this to a private admin password
 - Environment variable `DATA_ENCRYPTION_KEY`: set this to a long private secret
 - Environment variable `DATABASE_PATH`: `/var/data/games-sync.localdb`
+- Environment variable `ALLOW_DATABASE_BOOTSTRAP`: keep this as `false` after the first database exists
 - Persistent disk mount path: `/var/data`
 
-Render services use an ephemeral filesystem by default, so a persistent disk is recommended for real events.
+Render services use an ephemeral filesystem by default, so a persistent disk is required for real events. If the
+database file is missing in production, the app refuses to create a fresh empty database unless
+`ALLOW_DATABASE_BOOTSTRAP=true` is set. This prevents a restart from silently looking like all rooms and members
+were reset. Only turn bootstrap on for a first setup, then turn it back off.
+
+The app also keeps encrypted rotating backups next to the database at `/var/data/backups` by default. These backups
+help if the primary database file is damaged or accidentally removed while the persistent disk is still intact.
+They cannot help if the Render service has no persistent disk attached, because the database and backups would both
+live on ephemeral storage.

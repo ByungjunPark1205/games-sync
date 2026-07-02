@@ -1271,6 +1271,14 @@ dialog::backdrop {
   font-weight: 850;
 }
 
+.admin-storage {
+  margin: -4px 0 8px;
+  color: rgba(154, 198, 217, 0.78);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .admin-user-list {
   display: grid;
   gap: 10px;

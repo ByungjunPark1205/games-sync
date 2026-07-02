@@ -10,6 +10,13 @@ const DATABASE_PATH =
   process.env.DATABASE_PATH || process.env.STORE_PATH || path.join(__dirname, "data", "games-sync.localdb");
 const LEGACY_STORE_PATH = process.env.LEGACY_STORE_PATH || "";
 const DATA_KEY_PATH = process.env.DATA_KEY_PATH || path.join(path.dirname(DATABASE_PATH), "encryption.key");
+const HAS_EXPLICIT_DATABASE_PATH = Boolean(process.env.DATABASE_PATH || process.env.STORE_PATH);
+const IS_RENDER = process.env.RENDER === "true" || Boolean(process.env.RENDER_SERVICE_ID);
+const ALLOW_DATABASE_BOOTSTRAP =
+  process.env.ALLOW_DATABASE_BOOTSTRAP === "true" || (!IS_RENDER && !HAS_EXPLICIT_DATABASE_PATH);
+const DATABASE_BACKUP_DIR =
+  process.env.DATABASE_BACKUP_DIR || path.join(path.dirname(DATABASE_PATH), "backups");
+const MAX_DATABASE_BACKUPS = positiveInt(process.env.MAX_DATABASE_BACKUPS, 30);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATABASE_ALGORITHM = "aes-256-gcm";
 
@@ -317,6 +324,64 @@ async function readStoreFile(filePath) {
   return { store: normalizeStore(payload), encrypted: false };
 }
 
+function backupStamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function encryptedDatabaseExists(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return isEncryptedDatabase(JSON.parse(raw));
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    return false;
+  }
+}
+
+async function backupCurrentDatabase() {
+  if (!(await encryptedDatabaseExists(DATABASE_PATH))) return;
+
+  await fs.mkdir(DATABASE_BACKUP_DIR, { recursive: true });
+  const backupPath = path.join(DATABASE_BACKUP_DIR, `games-sync-${backupStamp()}.localdb`);
+  await fs.copyFile(DATABASE_PATH, backupPath);
+  await pruneDatabaseBackups();
+}
+
+async function databaseBackupPaths() {
+  try {
+    const entries = await fs.readdir(DATABASE_BACKUP_DIR, { withFileTypes: true });
+    const files = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".localdb"))
+        .map(async (entry) => {
+          const filePath = path.join(DATABASE_BACKUP_DIR, entry.name);
+          const stats = await fs.stat(filePath);
+          return { filePath, mtimeMs: stats.mtimeMs };
+        })
+    );
+    return files.sort((a, b) => b.mtimeMs - a.mtimeMs).map((entry) => entry.filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function pruneDatabaseBackups() {
+  const backups = await databaseBackupPaths();
+  await Promise.all(backups.slice(MAX_DATABASE_BACKUPS).map((backupPath) => fs.rm(backupPath)));
+}
+
+async function readLatestDatabaseBackup() {
+  for (const backupPath of await databaseBackupPaths()) {
+    try {
+      return await readStoreFile(backupPath);
+    } catch (error) {
+      console.error(`Could not read database backup ${backupPath}:`, error.message);
+    }
+  }
+  return null;
+}
+
 function storeScore(store) {
   return store.rooms.reduce(
     (score, room) => score + 1 + room.users.length * 10 + room.likes.length,
@@ -369,6 +434,12 @@ async function readStore() {
     if (error.code !== "ENOENT") throw error;
   }
 
+  const backup = await readLatestDatabaseBackup();
+  if (backup) {
+    await writeStore(backup.store, { backup: false });
+    return backup.store;
+  }
+
   for (const legacyPath of legacyStorePaths()) {
     try {
       const result = await readStoreFile(legacyPath);
@@ -379,15 +450,27 @@ async function readStore() {
     }
   }
 
+  if (!ALLOW_DATABASE_BOOTSTRAP) {
+    throw new Error(
+      `Database file is missing at ${DATABASE_PATH}. Refusing to create a fresh empty database. ` +
+        "Attach a persistent disk to this path, restore a backup, or set ALLOW_DATABASE_BOOTSTRAP=true once for first setup."
+    );
+  }
+
   const store = normalizeStore(DEFAULT_STORE);
   await writeStore(store);
   return store;
 }
 
-async function writeStore(store) {
+async function writeStore(store, options = {}) {
   await fs.mkdir(path.dirname(DATABASE_PATH), { recursive: true });
+  if (options.backup !== false) {
+    await backupCurrentDatabase();
+  }
   const encryptedPayload = await encryptStorePayload(store);
-  await fs.writeFile(DATABASE_PATH, JSON.stringify(encryptedPayload, null, 2), "utf8");
+  const tempPath = `${DATABASE_PATH}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(tempPath, JSON.stringify(encryptedPayload, null, 2), "utf8");
+  await fs.rename(tempPath, DATABASE_PATH);
 }
 
 function sendJson(res, status, payload) {
@@ -647,6 +730,16 @@ function roomFromAdminRequest(store, code) {
   return findRoom(store, cleanText(code, 80));
 }
 
+function storagePayload() {
+  return {
+    databasePath: DATABASE_PATH,
+    dataKeyPath: process.env.DATA_ENCRYPTION_KEY || process.env.DB_ENCRYPTION_KEY ? "environment secret" : DATA_KEY_PATH,
+    backupDir: DATABASE_BACKUP_DIR,
+    allowDatabaseBootstrap: ALLOW_DATABASE_BOOTSTRAP,
+    isRender: IS_RENDER
+  };
+}
+
 async function handleAdminStatus(req, res, url) {
   const store = await requireAdmin(req, res);
   if (!store) return;
@@ -656,6 +749,7 @@ async function handleAdminStatus(req, res, url) {
     rooms: store.rooms.map(roomSummary),
     room: room ? roomSummary(room) : null,
     users: room ? room.users.map((user) => adminUser(room, user)) : [],
+    storage: storagePayload(),
     updatedAt: store.updatedAt
   });
 }
