@@ -33,13 +33,8 @@ const elements = {
   toast: $("#toast")
 };
 
-function showToast(message) {
-  elements.toast.textContent = message;
-  elements.toast.classList.remove("hidden");
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    elements.toast.classList.add("hidden");
-  }, 3200);
+function showToast() {
+  elements.toast.classList.add("hidden");
 }
 
 function headerValue(value) {
@@ -104,6 +99,7 @@ function renderUsers() {
           <div>
             <h3>${escapeHtml(user.nickname)}</h3>
             <p class="affiliation-chip">${escapeHtml(user.affiliationLabel)}</p>
+            ${user.statusMessage ? `<p class="status-message compact">${escapeHtml(user.statusMessage)}</p>` : ""}
             <p class="approval-status">${user.status === "pending" ? "승인 대기" : "승인됨"}</p>
             <p class="admin-user-meta">SIGNAL ${user.signalRemaining}/${user.signalLimit} · OPEN ${user.openSignalRemaining}/${user.openSignalLimit} · 회수 ${user.revokeRemaining}/${user.revokeLimit} · 받은 SIGNAL ${user.receivedCount}</p>
           </div>

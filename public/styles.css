@@ -442,6 +442,19 @@ label {
   box-shadow: 0 0 16px rgba(95, 213, 154, 0.12);
 }
 
+.status-message {
+  margin: 8px 0 0;
+  color: rgba(232, 236, 243, 0.88);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.status-message.compact {
+  margin-top: 5px;
+  color: rgba(154, 198, 217, 0.82);
+  font-size: 0.8rem;
+}
+
 input {
   width: 100%;
   min-height: 54px;

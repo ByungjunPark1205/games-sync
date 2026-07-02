@@ -34,7 +34,8 @@ const elements = {
   eventCode: $("#eventCode"),
   gateError: $("#gateError"),
   nickname: $("#nickname"),
-  tagInputs: Array.from(document.querySelectorAll("input[name='roleTags'], input[name='groupTags'], input[name='seekingTags']")),
+  statusMessage: $("#statusMessage"),
+  tagInputs: Array.from(document.querySelectorAll("input[name='groupTags'], input[name='seekingTags']")),
   contact: $("#contact"),
   password: $("#password"),
   statsPanel: $("#statsPanel"),
@@ -43,6 +44,7 @@ const elements = {
   rankingList: $("#rankingList"),
   profileNickname: $("#profileNickname"),
   profileAffiliation: $("#profileAffiliation"),
+  profileStatusMessage: $("#profileStatusMessage"),
   profileContact: $("#profileContact"),
   profileCode: $("#profileCode"),
   refreshButton: $("#refreshButton"),
@@ -56,13 +58,8 @@ const elements = {
   toast: $("#toast")
 };
 
-function showToast(message) {
-  elements.toast.textContent = message;
-  elements.toast.classList.remove("hidden");
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    elements.toast.classList.add("hidden");
-  }, 3200);
+function showToast() {
+  elements.toast.classList.add("hidden");
 }
 
 function showGateError(message = "") {
@@ -91,7 +88,6 @@ function emptyTags() {
 function getSelectedTags() {
   return elements.tagInputs.reduce((tags, input) => {
     if (!input.checked) return tags;
-    if (input.name === "roleTags") tags.roles.push(input.value);
     if (input.name === "groupTags") tags.groups.push(input.value);
     if (input.name === "seekingTags") tags.seeking.push(input.value);
     return tags;
@@ -100,19 +96,19 @@ function getSelectedTags() {
 
 function setSelectedTags(tags = emptyTags()) {
   elements.tagInputs.forEach((input) => {
-    const key =
-      input.name === "roleTags" ? "roles" : input.name === "groupTags" ? "groups" : "seeking";
+    const key = input.name === "groupTags" ? "groups" : "seeking";
     input.checked = Array.isArray(tags[key]) && tags[key].includes(input.value);
   });
 }
 
 function tagsText(tags = emptyTags()) {
-  const labels = [...(tags.roles || []), ...(tags.groups || []), ...(tags.seeking || [])];
+  const labels = [...(tags.groups || []), ...(tags.seeking || [])];
   return labels.length ? labels.join(" · ") : "태그 미선택";
 }
 
 function fillLoginFormFromUser(user = {}) {
   elements.nickname.value = user.nickname || "";
+  elements.statusMessage.value = user.statusMessage || "";
   elements.contact.value = user.contact || "";
   const savedTags = user.tags || emptyTags();
   if ((!savedTags.groups || !savedTags.groups.length) && user.affiliation) {
@@ -232,6 +228,7 @@ function renderProfile() {
   const user = state.user || {};
   elements.profileNickname.textContent = user.nickname || "-";
   elements.profileAffiliation.textContent = tagsText(user.tags);
+  elements.profileStatusMessage.textContent = user.statusMessage || "상태메시지 미입력";
   elements.profileContact.textContent = user.contact ? `연락처: ${user.contact}` : "연락처: -";
   elements.profileCode.textContent = state.code || "-";
 }
@@ -293,6 +290,7 @@ function renderPeople() {
           <div>
             <h3>${escapeHtml(person.nickname)}</h3>
             <p class="affiliation-chip">${escapeHtml(tagsText(person.tags))}</p>
+            ${person.statusMessage ? `<p class="status-message">${escapeHtml(person.statusMessage)}</p>` : ""}
             ${
               isSynced
                 ? `<div class="sync-contact-callout" aria-label="SYNC 연락처 안내">
@@ -400,6 +398,7 @@ function renderRankings() {
           <div>
             <h3>${escapeHtml(person.nickname)}</h3>
             <p class="affiliation-chip">${escapeHtml(tagsText(person.tags))}</p>
+            ${person.statusMessage ? `<p class="status-message compact">${escapeHtml(person.statusMessage)}</p>` : ""}
           </div>
           <strong>${person.receivedCount}</strong>
         </article>
@@ -485,6 +484,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({
         nickname: elements.nickname.value,
+        statusMessage: elements.statusMessage.value,
         tags: getSelectedTags(),
         contact: elements.contact.value,
         password: elements.password.value
@@ -492,6 +492,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
     });
     state.user = {
       ...data.user,
+      statusMessage: elements.statusMessage.value,
       tags: getSelectedTags()
     };
     state.room = data.room;

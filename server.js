@@ -29,10 +29,10 @@ const SIGNAL = "signal";
 const OPEN_SIGNAL = "open";
 const USER_STATUS_PENDING = "pending";
 const USER_STATUS_APPROVED = "approved";
-const AFFILIATIONS = new Set(["Games", "동물원", "수녀원"]);
+const AFFILIATIONS = new Set(["Games", "동물원", "수녀원", "지인소개"]);
 const TAG_OPTIONS = {
-  roles: ["탑", "올탑", "올", "올바텀", "바텀", "비선호"],
-  groups: ["Games", "동물원", "수녀원"],
+  roles: [],
+  groups: ["Games", "동물원", "수녀원", "지인소개"],
   seeking: ["연애만", "친분만", "아무나환영"]
 };
 
@@ -147,7 +147,7 @@ function normalizeTags(tags = {}, user = {}) {
 
 function tagLabel(user) {
   const tags = normalizeTags(user.tags, user);
-  const labels = [...tags.roles, ...tags.groups, ...tags.seeking];
+  const labels = [...tags.groups, ...tags.seeking];
   return labels.length ? labels.join(" · ") : "태그 미선택";
 }
 
@@ -165,6 +165,7 @@ function normalizeUser(user) {
   user.revokesUsed = positiveInt(user.revokesUsed, 0);
   user.status = user.status === USER_STATUS_PENDING ? USER_STATUS_PENDING : USER_STATUS_APPROVED;
   user.tags = normalizeTags(user.tags, user);
+  user.statusMessage = cleanText(user.statusMessage, 120);
   user.affiliation = AFFILIATIONS.has(user.affiliation) ? user.affiliation : "";
   user.affiliationDetail = cleanText(user.affiliationDetail, 80);
   return user;
@@ -586,6 +587,7 @@ function publicUser(user) {
   return {
     id: user.id,
     nickname: user.nickname,
+    statusMessage: cleanText(user.statusMessage, 120),
     affiliationLabel: affiliationLabel(user),
     tags: normalizeTags(user.tags, user),
     status: user.status,
@@ -700,6 +702,7 @@ function matchPayload(room, userId) {
     .map((user) => ({
       id: user.id,
       nickname: user.nickname,
+      statusMessage: cleanText(user.statusMessage, 120),
       affiliationLabel: affiliationLabel(user),
       contact: user.contact,
       matchedAt: matchTime(room, userId, user.id)
@@ -986,6 +989,7 @@ async function handleApproveUser(req, res) {
 async function handleSession(req, res, store, room) {
   const body = await readBody(req);
   const nickname = cleanText(body.nickname, 32).replace(/\s+/g, " ");
+  const statusMessage = cleanText(body.statusMessage, 120);
   const contact = cleanText(body.contact, 80);
   const password = cleanText(body.password, 120);
   const normalized = normalizeNickname(nickname);
@@ -1003,6 +1007,7 @@ async function handleSession(req, res, store, room) {
       return;
     }
     user.contact = contact;
+    user.statusMessage = statusMessage;
     user.tags = tags;
     user.affiliation = tags.groups[0] || "";
     user.affiliationDetail = "";
@@ -1013,6 +1018,7 @@ async function handleSession(req, res, store, room) {
       nickname,
       normalizedNickname: normalized,
       contact,
+      statusMessage,
       tags,
       affiliation: tags.groups[0] || "",
       affiliationDetail: "",

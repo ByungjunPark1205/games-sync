@@ -50,23 +50,17 @@
             <span>닉네임</span>
             <input id="nickname" name="nickname" autocomplete="nickname" placeholder="입장 때 걸 닉네임" maxlength="32" required />
           </label>
-          <fieldset class="tag-fieldset">
-            <legend>성향 태그</legend>
-            <div class="tag-options">
-              <label><input type="checkbox" name="roleTags" value="탑" /><span>탑</span></label>
-              <label><input type="checkbox" name="roleTags" value="올탑" /><span>올탑</span></label>
-              <label><input type="checkbox" name="roleTags" value="올" /><span>올</span></label>
-              <label><input type="checkbox" name="roleTags" value="올바텀" /><span>올바텀</span></label>
-              <label><input type="checkbox" name="roleTags" value="바텀" /><span>바텀</span></label>
-              <label><input type="checkbox" name="roleTags" value="비선호" /><span>비선호</span></label>
-            </div>
-          </fieldset>
+          <label>
+            <span>상태메시지</span>
+            <input id="statusMessage" name="statusMessage" autocomplete="off" placeholder="나를 소개하는 짧은 문구" maxlength="120" />
+          </label>
           <fieldset class="tag-fieldset">
             <legend>소속 태그</legend>
             <div class="tag-options">
               <label><input type="checkbox" name="groupTags" value="Games" /><span>Games</span></label>
               <label><input type="checkbox" name="groupTags" value="동물원" /><span>동물원</span></label>
               <label><input type="checkbox" name="groupTags" value="수녀원" /><span>수녀원</span></label>
+              <label><input type="checkbox" name="groupTags" value="지인소개" /><span>지인소개</span></label>
             </div>
           </fieldset>
           <fieldset class="tag-fieldset">
@@ -120,6 +114,10 @@
               <div>
                 <dt>태그</dt>
                 <dd id="profileAffiliation">-</dd>
+              </div>
+              <div>
+                <dt>상태메시지</dt>
+                <dd id="profileStatusMessage">-</dd>
               </div>
               <div>
                 <dt>연락처</dt>
