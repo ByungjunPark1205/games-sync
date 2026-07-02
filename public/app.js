@@ -139,7 +139,6 @@ async function checkApprovalStatus({ silent = false } = {}) {
     showToast("승인이 완료됐어요. SIGNAL을 시작할 수 있어요.");
   } catch (error) {
     if (error.status === 403) {
-      if (!silent) showToast("관리자 승인을 받는중입니다.");
       setView("pending");
       return;
     }
@@ -149,7 +148,6 @@ async function checkApprovalStatus({ silent = false } = {}) {
 
 function showPendingApproval() {
   setView("pending");
-  showToast("관리자 승인을 받는중입니다.");
   window.clearInterval(approvalTimer);
   approvalTimer = window.setInterval(() => {
     checkApprovalStatus({ silent: true });
@@ -166,7 +164,6 @@ function returnToGate() {
   state.stats = null;
   elements.eventCode.value = "";
   setView("gate");
-  showToast("입장 코드를 다시 입력할 수 있어요.");
 }
 
 function updateAffiliationInput() {
@@ -402,7 +399,6 @@ elements.gateForm.addEventListener("submit", async (event) => {
     state.user = null;
     sessionStorage.setItem("gamesSyncCode", code);
     fillLoginFormFromUser(savedUser || {});
-    showToast(data.message);
     setView("login");
     setSection("home");
   } catch (error) {
@@ -442,7 +438,6 @@ elements.loginForm.addEventListener("submit", async (event) => {
       showPendingApproval();
       return;
     }
-    showToast(`${state.user.nickname}님, Games Sync에 입장했어요.`);
     setView("home");
     setSection("home");
     await loadPeople();
@@ -518,7 +513,6 @@ elements.alertsNav.addEventListener("click", () => {
 async function refreshCurrentState() {
   try {
     await loadPeople();
-    showToast("새로고침했어요.");
   } catch (error) {
     showToast(error.message);
   }
