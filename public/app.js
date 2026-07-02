@@ -24,6 +24,7 @@ const elements = {
   gateForm: $("#gateForm"),
   loginForm: $("#loginForm"),
   backToCodeButton: $("#backToCodeButton"),
+  roomBackToCodeButton: $("#roomBackToCodeButton"),
   eventCode: $("#eventCode"),
   nickname: $("#nickname"),
   affiliation: $("#affiliation"),
@@ -322,6 +323,7 @@ async function loadPeople() {
 
 elements.affiliation.addEventListener("change", updateAffiliationInput);
 elements.backToCodeButton.addEventListener("click", returnToGate);
+elements.roomBackToCodeButton.addEventListener("click", returnToGate);
 
 elements.gateForm.addEventListener("submit", async (event) => {
   event.preventDefault();

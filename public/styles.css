@@ -463,6 +463,10 @@ select:focus {
   color: var(--cyan);
 }
 
+.room-back-button {
+  margin: 0 0 14px;
+}
+
 .ghost-button,
 .tab,
 .like-button,
