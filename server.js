@@ -69,6 +69,14 @@ class DatabaseMissingError extends Error {
   }
 }
 
+class ConfigurationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ConfigurationError";
+    this.code = "CONFIGURATION_ERROR";
+  }
+}
+
 function createRoom(code, values = {}) {
   return {
     id: values.id || crypto.randomUUID(),
@@ -264,7 +272,7 @@ async function dataKey() {
   }
 
   if (USE_UPSTASH_STORE && IS_RENDER) {
-    throw new Error("DATA_ENCRYPTION_KEY is required when using Upstash Redis on Render.");
+    throw new ConfigurationError("DATA_ENCRYPTION_KEY가 필요합니다. Render 환경변수에 고정 암호화 키를 추가해주세요.");
   }
 
   try {
@@ -1339,6 +1347,10 @@ const server = http.createServer(async (req, res) => {
     console.error(error);
     if (error instanceof DatabaseMissingError) {
       sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. 관리자에게 문의해주세요.");
+      return;
+    }
+    if (error instanceof ConfigurationError) {
+      sendError(res, 503, error.message);
       return;
     }
     sendError(res, 500, "서버 오류가 발생했습니다.");
