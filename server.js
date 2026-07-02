@@ -279,6 +279,10 @@ function hasSignalBetween(room, from, to) {
   return room.likes.some((like) => like.from === from && like.to === to);
 }
 
+function isMatchedPair(room, userId, targetId) {
+  return hasSignalBetween(room, userId, targetId) && hasSignalBetween(room, targetId, userId);
+}
+
 function hasSignalType(room, from, to, type) {
   return room.likes.some((like) => like.from === from && like.to === to && like.type === type);
 }
@@ -707,6 +711,11 @@ async function handleRevokeLike(req, res, store, room) {
 
   if (!user || !target || user.id === target.id) {
     sendError(res, 400, "SIGNAL을 회수할 수 없습니다.");
+    return;
+  }
+
+  if (isMatchedPair(room, user.id, target.id)) {
+    sendError(res, 400, "SYNC된 상대에게 보낸 SIGNAL은 회수할 수 없습니다.");
     return;
   }
 
