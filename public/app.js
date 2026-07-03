@@ -47,6 +47,10 @@ const elements = {
   profileStatusMessage: $("#profileStatusMessage"),
   profileContact: $("#profileContact"),
   profileCode: $("#profileCode"),
+  profileEditForm: $("#profileEditForm"),
+  profileEditStatusMessage: $("#profileEditStatusMessage"),
+  profileEditContact: $("#profileEditContact"),
+  profileEditStatus: $("#profileEditStatus"),
   refreshButton: $("#refreshButton"),
   profileRefreshButton: $("#profileRefreshButton"),
   notificationRefreshButton: $("#notificationRefreshButton"),
@@ -65,6 +69,12 @@ function showToast() {
 function showGateError(message = "") {
   elements.gateError.textContent = message;
   elements.gateError.classList.toggle("hidden", !message);
+}
+
+function showProfileEditStatus(message = "", isError = false) {
+  elements.profileEditStatus.textContent = message;
+  elements.profileEditStatus.classList.toggle("hidden", !message);
+  elements.profileEditStatus.classList.toggle("success-text", Boolean(message && !isError));
 }
 
 function userStorageKey(code = state.code) {
@@ -231,6 +241,8 @@ function renderProfile() {
   elements.profileStatusMessage.textContent = user.statusMessage || "상태메시지 미입력";
   elements.profileContact.textContent = user.contact ? `연락처: ${user.contact}` : "연락처: -";
   elements.profileCode.textContent = state.code || "-";
+  elements.profileEditStatusMessage.value = user.statusMessage || "";
+  elements.profileEditContact.value = user.contact || "";
 }
 
 function renderStats() {
@@ -359,9 +371,9 @@ function notificationItems() {
   return [...signalItems, ...openItems, ...syncItems].sort((a, b) => {
     const aTime = new Date(a.time).getTime();
     const bTime = new Date(b.time).getTime();
-    if (aTime !== bTime) return aTime - bTime;
-    if (a.order !== b.order) return a.order - b.order;
-    if (a.priority !== b.priority) return a.priority - b.priority;
+    if (aTime !== bTime) return bTime - aTime;
+    if (a.order !== b.order) return b.order - a.order;
+    if (a.priority !== b.priority) return b.priority - a.priority;
     return a.title.localeCompare(b.title);
   });
 }
@@ -429,8 +441,7 @@ function formatTime(value) {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
+    minute: "2-digit"
   }).format(date);
 }
 
@@ -570,6 +581,30 @@ elements.profileNav.addEventListener("click", () => {
 
 elements.homeNav.addEventListener("click", () => {
   setSection("home");
+});
+
+elements.profileEditForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showProfileEditStatus();
+  try {
+    const data = await request("/api/profile", {
+      method: "POST",
+      body: JSON.stringify({
+        statusMessage: elements.profileEditStatusMessage.value,
+        contact: elements.profileEditContact.value
+      })
+    });
+    state.user = data.user;
+    state.room = data.room;
+    state.matches = data.matches;
+    state.rankings = data.rankings || [];
+    state.stats = data.stats;
+    saveCurrentUser();
+    render();
+    showProfileEditStatus("저장됐어요.");
+  } catch (error) {
+    showProfileEditStatus(error.message, true);
+  }
 });
 
 elements.rankingNav.addEventListener("click", async () => {

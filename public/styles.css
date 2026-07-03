@@ -381,6 +381,10 @@ h2 {
   text-align: center;
 }
 
+.success-text {
+  color: #ffd36b;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -1050,6 +1054,19 @@ select:focus {
   font-size: 0.93rem;
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.profile-note {
+  position: relative;
+  margin: 12px 0 0;
+  color: var(--muted-sky);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.profile-edit-form {
+  position: relative;
+  margin-top: 16px;
 }
 
 .notifications-view {

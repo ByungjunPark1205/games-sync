@@ -1096,6 +1096,38 @@ async function handleSession(req, res, store, room) {
   });
 }
 
+async function handleProfile(req, res, store, room) {
+  const userId = cleanText(req.headers["x-user-id"], 80);
+  const body = await readBody(req);
+  const user = room.users.find((entry) => entry.id === userId);
+  const contact = cleanText(body.contact, 80);
+  const statusMessage = cleanText(body.statusMessage, 120);
+
+  if (!user) {
+    sendError(res, 401, "다시 로그인해주세요.");
+    return;
+  }
+  if (!contact) {
+    sendError(res, 400, "연락처를 입력해주세요.");
+    return;
+  }
+
+  user.contact = contact;
+  user.statusMessage = statusMessage;
+  user.lastSeenAt = new Date().toISOString();
+  room.updatedAt = new Date().toISOString();
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+
+  sendJson(res, 200, {
+    user: privateUser(user),
+    room: roomSummary(room),
+    stats: isApprovedUser(user) ? statsPayload(room, user.id) : null,
+    matches: isApprovedUser(user) ? matchPayload(room, user.id) : [],
+    rankings: rankingPayload(room)
+  });
+}
+
 function peoplePayload(room, user) {
   const matches = matchPayload(room, user.id);
   const people = room.users
@@ -1297,6 +1329,10 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/session") {
     await handleSession(req, res, store, room);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/profile") {
+    await handleProfile(req, res, store, room);
     return;
   }
   if (req.method === "GET" && url.pathname === "/api/people") {
