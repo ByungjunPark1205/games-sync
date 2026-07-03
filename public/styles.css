@@ -1084,11 +1084,12 @@ select:focus {
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 1px solid rgba(95, 213, 154, 0.5);
+  border: 1px solid rgba(255, 211, 107, 0.62);
   border-radius: 50%;
-  color: #c8ffdc;
+  color: #ffe7a3;
   font-weight: 950;
-  box-shadow: 0 0 18px rgba(95, 213, 154, 0.14);
+  background: rgba(255, 211, 107, 0.08);
+  box-shadow: 0 0 18px rgba(255, 211, 107, 0.18);
 }
 
 .ranking-card h3 {
@@ -1097,13 +1098,14 @@ select:focus {
 }
 
 .ranking-card strong {
-  color: var(--green);
+  color: #ffd36b;
   font-size: 1.24rem;
   font-weight: 950;
 }
 
 .rank-1 {
-  border-color: rgba(95, 213, 154, 0.56);
+  border-color: rgba(255, 211, 107, 0.66);
+  box-shadow: 0 0 22px rgba(255, 211, 107, 0.12);
 }
 
 .timeline-list {
