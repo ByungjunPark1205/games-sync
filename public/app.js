@@ -350,7 +350,11 @@ function renderPeople() {
             ${
               isSynced
                 ? `<div class="sync-contact-callout" aria-label="SYNC 연락처 안내">
-                    <p class="contact-line sync-contact">-&gt;-&gt;[${escapeHtml(match.contact)}]&lt;-&lt;-</p>
+                    <p class="contact-line sync-contact">
+                      <span class="contact-arrow contact-arrow-left" aria-hidden="true"></span>
+                      <span class="contact-value">${escapeHtml(match.contact)}</span>
+                      <span class="contact-arrow contact-arrow-right" aria-hidden="true"></span>
+                    </p>
                     <p class="sync-help">여기로 연락해보세요!</p>
                   </div>`
                 : `<p>마음이 가면 SIGNAL을 보내세요.</p>`
