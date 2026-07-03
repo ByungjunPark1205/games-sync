@@ -626,7 +626,7 @@ function roomSummary(room) {
 function receivedSignalCount(room, userId) {
   return new Set(
     room.likes
-      .filter((like) => like.to === userId && like.type === SIGNAL)
+      .filter((like) => like.to === userId && (like.type === SIGNAL || like.type === OPEN_SIGNAL))
       .map((like) => like.from)
   ).size;
 }
@@ -695,6 +695,15 @@ function matchTime(room, userId, matchedUserId) {
   return new Date(Math.max(...timestamps)).toISOString();
 }
 
+function matchOrder(room, userId, matchedUserId) {
+  return room.likes.reduce((latestOrder, like, index) => {
+    const isPairLike =
+      (like.from === userId && like.to === matchedUserId) ||
+      (like.from === matchedUserId && like.to === userId);
+    return isPairLike ? Math.max(latestOrder, index) : latestOrder;
+  }, -1);
+}
+
 function matchPayload(room, userId) {
   const sentTo = new Set(room.likes.filter((like) => like.from === userId).map((like) => like.to));
   const matchedUserIds = new Set();
@@ -713,7 +722,8 @@ function matchPayload(room, userId) {
       statusMessage: cleanText(user.statusMessage, 120),
       affiliationLabel: affiliationLabel(user),
       contact: user.contact,
-      matchedAt: matchTime(room, userId, user.id)
+      matchedAt: matchTime(room, userId, user.id),
+      order: matchOrder(room, userId, user.id)
     }));
 }
 
@@ -743,20 +753,24 @@ function statsPayload(room, userId) {
   ).length;
   const receivedCount = receivedSignalCount(room, userId);
   const receivedSignals = room.likes
-    .filter((like) => like.to === userId && like.type === SIGNAL)
-    .map((like) => ({
-      sentAt: like.createdAt
+    .map((like, index) => ({ like, index }))
+    .filter((entry) => entry.like.to === userId && entry.like.type === SIGNAL)
+    .map((entry) => ({
+      sentAt: entry.like.createdAt,
+      order: entry.index
     }));
   const openSignals = room.likes
-    .filter((like) => like.to === userId && like.type === OPEN_SIGNAL)
-    .map((like) => {
-      const sender = room.users.find((entry) => entry.id === like.from);
+    .map((like, index) => ({ like, index }))
+    .filter((entry) => entry.like.to === userId && entry.like.type === OPEN_SIGNAL)
+    .map((entry) => {
+      const sender = room.users.find((userEntry) => userEntry.id === entry.like.from);
       if (!sender) return null;
       return {
         ...publicUser(sender),
         contact: sender.contact,
-        note: like.note,
-        sentAt: like.createdAt
+        note: entry.like.note,
+        sentAt: entry.like.createdAt,
+        order: entry.index
       };
     })
     .filter(Boolean);

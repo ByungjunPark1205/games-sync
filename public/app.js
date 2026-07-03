@@ -330,6 +330,7 @@ function notificationItems() {
     type: "signal",
     title: "새로운 SIGNAL을 받았어요.",
     time: signal.sentAt,
+    order: signal.order ?? 0,
     priority: 1,
     body: "누군가 마음을 보냈어요.",
     note: ""
@@ -339,6 +340,7 @@ function notificationItems() {
     type: "open",
     title: `${person.nickname}님이 OPEN SIGNAL을 보냈어요.`,
     time: person.sentAt,
+    order: person.order ?? 0,
     priority: 2,
     body: `연락처: ${person.contact}`,
     note: person.note || ""
@@ -348,14 +350,19 @@ function notificationItems() {
     type: "sync",
     title: `${match.nickname}님과 SYNC됐어요.`,
     time: match.matchedAt,
+    order: match.order ?? 0,
     priority: 3,
     body: `연락처: ${match.contact}`,
     note: "두 사람의 SIGNAL이 SYNC됐어요."
   }));
 
   return [...signalItems, ...openItems, ...syncItems].sort((a, b) => {
+    const aTime = new Date(a.time).getTime();
+    const bTime = new Date(b.time).getTime();
+    if (aTime !== bTime) return aTime - bTime;
+    if (a.order !== b.order) return a.order - b.order;
     if (a.priority !== b.priority) return a.priority - b.priority;
-    return new Date(b.time) - new Date(a.time);
+    return a.title.localeCompare(b.title);
   });
 }
 
@@ -422,7 +429,8 @@ function formatTime(value) {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    second: "2-digit"
   }).format(date);
 }
 
