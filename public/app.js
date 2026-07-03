@@ -392,8 +392,8 @@ function notificationItems() {
     time: signal.sentAt,
     order: signal.order ?? 0,
     priority: 1,
-    body: "",
-    note: ""
+    contact: "",
+    message: ""
   }));
 
   const openItems = (state.stats?.openSignals || []).map((person) => ({
@@ -402,8 +402,8 @@ function notificationItems() {
     time: person.sentAt,
     order: person.order ?? 0,
     priority: 2,
-    body: `연락처: ${person.contact}`,
-    note: person.note || ""
+    contact: person.contact,
+    message: person.note || ""
   }));
 
   const syncItems = state.matches.map((match) => ({
@@ -412,8 +412,8 @@ function notificationItems() {
     time: match.matchedAt,
     order: match.order ?? 0,
     priority: 3,
-    body: `연락처: ${match.contact}`,
-    note: "두 사람의 SIGNAL이 SYNC됐어요."
+    contact: match.contact,
+    message: ""
   }));
 
   return [...signalItems, ...openItems, ...syncItems].sort((a, b) => {
@@ -424,6 +424,19 @@ function notificationItems() {
     if (a.priority !== b.priority) return b.priority - a.priority;
     return a.title.localeCompare(b.title);
   });
+}
+
+function renderNotificationContact(contact) {
+  return `
+    <div class="notification-contact-callout" aria-label="알림 연락처 안내">
+      <p class="contact-line sync-contact">
+        <span class="contact-arrow contact-arrow-left" aria-hidden="true"></span>
+        <span class="contact-value">${escapeHtml(contact)}</span>
+        <span class="contact-arrow contact-arrow-right" aria-hidden="true"></span>
+      </p>
+      <p class="sync-help">여기로 연락해보세요!</p>
+    </div>
+  `;
 }
 
 function renderNotifications() {
@@ -441,8 +454,8 @@ function renderNotifications() {
           <div>
             <time>${formatTime(item.time)}</time>
             <h3>${escapeHtml(item.title)}</h3>
-            ${item.body ? `<p class="contact-line">${escapeHtml(item.body)}</p>` : ""}
-            ${item.note ? `<p class="signal-note">${escapeHtml(item.note)}</p>` : ""}
+            ${item.contact ? renderNotificationContact(item.contact) : ""}
+            ${item.message ? `<div class="timeline-message"><strong>내용:</strong><span>${escapeHtml(item.message)}</span></div>` : ""}
           </div>
         </article>
       `
