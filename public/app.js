@@ -36,6 +36,7 @@ const elements = {
   nickname: $("#nickname"),
   statusMessage: $("#statusMessage"),
   tagInputs: Array.from(document.querySelectorAll("input[name='groupTags'], input[name='seekingTags']")),
+  profileTagInputs: Array.from(document.querySelectorAll("input[name='profileGroupTags'], input[name='profileSeekingTags']")),
   contact: $("#contact"),
   password: $("#password"),
   statsPanel: $("#statsPanel"),
@@ -51,6 +52,8 @@ const elements = {
   profileEditStatusMessage: $("#profileEditStatusMessage"),
   profileEditContact: $("#profileEditContact"),
   profileEditStatus: $("#profileEditStatus"),
+  signalGuide: $("#signalGuide"),
+  signalGuideClose: $("#signalGuideClose"),
   refreshButton: $("#refreshButton"),
   profileRefreshButton: $("#profileRefreshButton"),
   notificationRefreshButton: $("#notificationRefreshButton"),
@@ -96,17 +99,39 @@ function emptyTags() {
 }
 
 function getSelectedTags() {
-  return elements.tagInputs.reduce((tags, input) => {
+  return getTagsFromInputs(elements.tagInputs);
+}
+
+function getProfileSelectedTags() {
+  return getTagsFromInputs(elements.profileTagInputs, {
+    groupName: "profileGroupTags",
+    seekingName: "profileSeekingTags"
+  });
+}
+
+function getTagsFromInputs(inputs, names = { groupName: "groupTags", seekingName: "seekingTags" }) {
+  return inputs.reduce((tags, input) => {
     if (!input.checked) return tags;
-    if (input.name === "groupTags") tags.groups.push(input.value);
-    if (input.name === "seekingTags") tags.seeking.push(input.value);
+    if (input.name === names.groupName) tags.groups.push(input.value);
+    if (input.name === names.seekingName) tags.seeking.push(input.value);
     return tags;
   }, emptyTags());
 }
 
 function setSelectedTags(tags = emptyTags()) {
-  elements.tagInputs.forEach((input) => {
-    const key = input.name === "groupTags" ? "groups" : "seeking";
+  setTagsToInputs(elements.tagInputs, tags);
+}
+
+function setProfileSelectedTags(tags = emptyTags()) {
+  setTagsToInputs(elements.profileTagInputs, tags, {
+    groupName: "profileGroupTags",
+    seekingName: "profileSeekingTags"
+  });
+}
+
+function setTagsToInputs(inputs, tags = emptyTags(), names = { groupName: "groupTags", seekingName: "seekingTags" }) {
+  inputs.forEach((input) => {
+    const key = input.name === names.groupName ? "groups" : "seeking";
     input.checked = Array.isArray(tags[key]) && tags[key].includes(input.value);
   });
 }
@@ -137,6 +162,23 @@ function fallbackToLogin(message = "저장된 접속 정보가 만료됐어요. 
   fillLoginFormFromUser(savedUser);
   setView("login");
   showToast(message);
+}
+
+function signalGuideKey() {
+  return `gamesSyncSignalGuide:${state.code}:${state.user?.id || "guest"}`;
+}
+
+function maybeShowSignalGuide() {
+  if (!state.code || !state.user?.id || state.user.status === "pending") return;
+  if (localStorage.getItem(signalGuideKey()) === "seen") return;
+  elements.signalGuide.classList.remove("hidden");
+}
+
+function closeSignalGuide() {
+  if (state.code && state.user?.id) {
+    localStorage.setItem(signalGuideKey(), "seen");
+  }
+  elements.signalGuide.classList.add("hidden");
 }
 
 function headerValue(value) {
@@ -181,6 +223,7 @@ async function checkApprovalStatus({ silent = false } = {}) {
     saveCurrentUser();
     setView("home");
     setSection("home");
+    maybeShowSignalGuide();
     showToast("승인이 완료됐어요. SIGNAL을 시작할 수 있어요.");
   } catch (error) {
     if (error.status === 403) {
@@ -243,6 +286,7 @@ function renderProfile() {
   elements.profileCode.textContent = state.code || "-";
   elements.profileEditStatusMessage.value = user.statusMessage || "";
   elements.profileEditContact.value = user.contact || "";
+  setProfileSelectedTags(user.tags || emptyTags());
 }
 
 function renderStats() {
@@ -306,7 +350,7 @@ function renderPeople() {
             ${
               isSynced
                 ? `<div class="sync-contact-callout" aria-label="SYNC 연락처 안내">
-                    <p class="contact-line sync-contact">연락처: ${escapeHtml(match.contact)}</p>
+                    <p class="contact-line sync-contact">-&gt;-&gt;[${escapeHtml(match.contact)}]&lt;-&lt;-</p>
                     <p class="sync-help">여기로 연락해보세요!</p>
                   </div>`
                 : `<p>마음이 가면 SIGNAL을 보내세요.</p>`
@@ -344,7 +388,7 @@ function notificationItems() {
     time: signal.sentAt,
     order: signal.order ?? 0,
     priority: 1,
-    body: "누군가 마음을 보냈어요.",
+    body: "",
     note: ""
   }));
 
@@ -393,7 +437,7 @@ function renderNotifications() {
           <div>
             <time>${formatTime(item.time)}</time>
             <h3>${escapeHtml(item.title)}</h3>
-            <p class="contact-line">${escapeHtml(item.body)}</p>
+            ${item.body ? `<p class="contact-line">${escapeHtml(item.body)}</p>` : ""}
             ${item.note ? `<p class="signal-note">${escapeHtml(item.note)}</p>` : ""}
           </div>
         </article>
@@ -472,6 +516,7 @@ elements.backToCodeButton.addEventListener("click", returnToGate);
 elements.pendingBackToCodeButton.addEventListener("click", returnToGate);
 elements.pendingRefreshButton.addEventListener("click", () => checkApprovalStatus());
 elements.roomBackToCodeButton.addEventListener("click", returnToGate);
+elements.signalGuideClose.addEventListener("click", closeSignalGuide);
 
 elements.gateForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -526,6 +571,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
     setView("home");
     setSection("home");
     await loadPeople();
+    maybeShowSignalGuide();
   } catch (error) {
     showToast(error.message);
   }
@@ -591,7 +637,8 @@ elements.profileEditForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({
         statusMessage: elements.profileEditStatusMessage.value,
-        contact: elements.profileEditContact.value
+        contact: elements.profileEditContact.value,
+        tags: getProfileSelectedTags()
       })
     });
     state.user = data.user;

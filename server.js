@@ -632,19 +632,29 @@ function receivedSignalCount(room, userId) {
 }
 
 function rankingPayload(room) {
-  return room.users
+  const rankedUsers = room.users
     .filter(isApprovedUser)
     .map((user) => ({
       ...publicUser(user),
       receivedCount: receivedSignalCount(room, user.id)
     }))
     .filter((user) => user.receivedCount > 0)
-    .sort((a, b) => b.receivedCount - a.receivedCount || a.nickname.localeCompare(b.nickname))
-    .slice(0, 3)
-    .map((user, index) => ({
-      ...user,
-      rank: index + 1
-    }));
+    .sort((a, b) => b.receivedCount - a.receivedCount || a.nickname.localeCompare(b.nickname));
+
+  let rank = 0;
+  let previousCount = null;
+  return rankedUsers
+    .map((user) => {
+      if (user.receivedCount !== previousCount) {
+        rank += 1;
+        previousCount = user.receivedCount;
+      }
+      return {
+        ...user,
+        rank
+      };
+    })
+    .filter((user) => user.rank <= 3);
 }
 
 function adminUser(room, user) {
@@ -1102,6 +1112,7 @@ async function handleProfile(req, res, store, room) {
   const user = room.users.find((entry) => entry.id === userId);
   const contact = cleanText(body.contact, 80);
   const statusMessage = cleanText(body.statusMessage, 120);
+  const tags = parseTags(body);
 
   if (!user) {
     sendError(res, 401, "다시 로그인해주세요.");
@@ -1114,6 +1125,9 @@ async function handleProfile(req, res, store, room) {
 
   user.contact = contact;
   user.statusMessage = statusMessage;
+  user.tags = tags;
+  user.affiliation = tags.groups[0] || "";
+  user.affiliationDetail = "";
   user.lastSeenAt = new Date().toISOString();
   room.updatedAt = new Date().toISOString();
   store.updatedAt = new Date().toISOString();

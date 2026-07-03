@@ -138,6 +138,23 @@
                 <span>연락처 수정</span>
                 <input id="profileEditContact" maxlength="80" placeholder="인스타 아이디 혹은 전화번호" required />
               </label>
+              <fieldset class="tag-fieldset">
+                <legend>소속 태그 수정</legend>
+                <div class="tag-options">
+                  <label><input type="checkbox" name="profileGroupTags" value="Games" /><span>Games</span></label>
+                  <label><input type="checkbox" name="profileGroupTags" value="동물원" /><span>동물원</span></label>
+                  <label><input type="checkbox" name="profileGroupTags" value="수녀원" /><span>수녀원</span></label>
+                  <label><input type="checkbox" name="profileGroupTags" value="지인소개" /><span>지인소개</span></label>
+                </div>
+              </fieldset>
+              <fieldset class="tag-fieldset">
+                <legend>찾는 관계 수정</legend>
+                <div class="tag-options">
+                  <label><input type="checkbox" name="profileSeekingTags" value="연애만" /><span>연애만</span></label>
+                  <label><input type="checkbox" name="profileSeekingTags" value="친분만" /><span>친분만</span></label>
+                  <label><input type="checkbox" name="profileSeekingTags" value="아무나환영" /><span>아무나환영</span></label>
+                </div>
+              </fieldset>
               <p class="form-error hidden" id="profileEditStatus"></p>
               <button class="primary-button" type="submit">내정보 저장</button>
             </form>
@@ -192,6 +209,24 @@
           <button class="nav-item" id="alertsNav" type="button">알림</button>
         </nav>
       </section>
+
+      <div class="signal-guide hidden" id="signalGuide" role="dialog" aria-modal="true" aria-labelledby="signal-guide-title">
+        <div class="signal-guide-card">
+          <p class="eyebrow">Signal Guide</p>
+          <h2 id="signal-guide-title">SIGNAL과 OPEN SIGNAL</h2>
+          <div class="guide-grid">
+            <section>
+              <h3>SIGNAL</h3>
+              <p>상대에게 마음을 조용히 보내요. 서로 SIGNAL을 보내면 SYNC가 되고, 그때 연락처를 확인할 수 있어요.</p>
+            </section>
+            <section>
+              <h3>OPEN SIGNAL</h3>
+              <p>상대에게 바로 마음과 연락처를 공개해요. 쪽지를 함께 보낼 수 있고, 상대 알림에 바로 표시돼요.</p>
+            </section>
+          </div>
+          <button class="primary-button" id="signalGuideClose" type="button">확인했어요</button>
+        </div>
+      </div>
 
       <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
     </main>
