@@ -8,6 +8,7 @@ const state = {
   people: [],
   matches: [],
   rankings: [],
+  circles: { active: null, myCircle: null },
   stats: null,
   section: "home"
 };
@@ -25,6 +26,7 @@ const elements = {
   homeContent: $("#homeContent"),
   notificationsView: $("#notificationsView"),
   rankingView: $("#rankingView"),
+  circleView: $("#circleView"),
   gateForm: $("#gateForm"),
   loginForm: $("#loginForm"),
   backToCodeButton: $("#backToCodeButton"),
@@ -43,6 +45,8 @@ const elements = {
   peopleList: $("#peopleList"),
   notificationList: $("#notificationList"),
   rankingList: $("#rankingList"),
+  myCirclePanel: $("#myCirclePanel"),
+  circleList: $("#circleList"),
   profileNickname: $("#profileNickname"),
   profileAffiliation: $("#profileAffiliation"),
   profileStatusMessage: $("#profileStatusMessage"),
@@ -58,9 +62,11 @@ const elements = {
   profileRefreshButton: $("#profileRefreshButton"),
   notificationRefreshButton: $("#notificationRefreshButton"),
   rankingRefreshButton: $("#rankingRefreshButton"),
+  circleRefreshButton: $("#circleRefreshButton"),
   profileNav: $("#profileNav"),
   homeNav: $("#homeNav"),
   rankingNav: $("#rankingNav"),
+  circleNav: $("#circleNav"),
   alertsNav: $("#alertsNav"),
   toast: $("#toast")
 };
@@ -158,6 +164,7 @@ function fallbackToLogin(message = "저장된 접속 정보가 만료됐어요. 
   state.people = [];
   state.matches = [];
   state.rankings = [];
+  state.circles = { active: null, myCircle: null };
   state.stats = null;
   fillLoginFormFromUser(savedUser);
   setView("login");
@@ -250,6 +257,7 @@ function returnToGate() {
   state.people = [];
   state.matches = [];
   state.rankings = [];
+  state.circles = { active: null, myCircle: null };
   state.stats = null;
   elements.eventCode.value = "";
   showGateError();
@@ -262,19 +270,23 @@ function setSection(section) {
   const alertsActive = section === "alerts";
   const homeActive = section === "home";
   const rankingActive = section === "ranking";
+  const circleActive = section === "circle";
 
   elements.profileView.classList.toggle("hidden", !profileActive);
   elements.homeContent.classList.toggle("hidden", !homeActive);
   elements.notificationsView.classList.toggle("hidden", !alertsActive);
   elements.rankingView.classList.toggle("hidden", !rankingActive);
+  elements.circleView.classList.toggle("hidden", !circleActive);
   elements.profileNav.classList.toggle("active", profileActive);
   elements.homeNav.classList.toggle("active", homeActive);
   elements.rankingNav.classList.toggle("active", rankingActive);
+  elements.circleNav.classList.toggle("active", circleActive);
   elements.alertsNav.classList.toggle("active", alertsActive);
 
   if (profileActive) renderProfile();
   if (alertsActive) renderNotifications();
   if (rankingActive) renderRankings();
+  if (circleActive) renderCircles();
 }
 
 function renderProfile() {
@@ -487,12 +499,57 @@ function renderRankings() {
     .join("");
 }
 
+function renderCircleCard(circle, { featured = false } = {}) {
+  if (!circle) return "";
+  return `
+    <article class="circle-card ${featured ? "my-circle-card" : ""}">
+      <div class="circle-card-head">
+        <span>${escapeHtml(circle.name)}</span>
+        <strong>${circle.members.length}명</strong>
+      </div>
+      <div class="circle-members">
+        ${circle.members
+          .map(
+            (member) => `
+              <div class="circle-member ${member.id === state.user?.id ? "is-me" : ""}">
+                <strong>${escapeHtml(member.nickname)}</strong>
+                <span>${escapeHtml(tagsText(member.tags))}</span>
+                ${member.statusMessage ? `<p>${escapeHtml(member.statusMessage)}</p>` : ""}
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderCircles() {
+  const circles = state.circles || { active: null, myCircle: null };
+  const groups = circles.active?.groups || [];
+
+  if (!circles.active) {
+    elements.myCirclePanel.innerHTML = `
+      <div class="empty-state">아직 공개된 Circle이 없어요. 관리자가 Circle을 확정하면 여기에 표시됩니다.</div>
+    `;
+    elements.circleList.innerHTML = "";
+    return;
+  }
+
+  elements.myCirclePanel.innerHTML = `
+    <h3>내 Circle</h3>
+    ${circles.myCircle ? renderCircleCard(circles.myCircle, { featured: true }) : `<div class="empty-state">이번 Circle에 아직 포함되지 않았어요.</div>`}
+  `;
+  elements.circleList.innerHTML = groups.map((group) => renderCircleCard(group)).join("");
+}
+
 function render() {
   renderProfile();
   renderStats();
   renderPeople();
   renderNotifications();
   renderRankings();
+  renderCircles();
 }
 
 function formatTime(value) {
@@ -523,6 +580,7 @@ async function loadPeople() {
   state.people = data.people;
   state.matches = data.matches;
   state.rankings = data.rankings || [];
+  state.circles = data.circles || { active: null, myCircle: null };
   state.stats = data.stats;
   saveCurrentUser();
   render();
@@ -579,6 +637,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
     state.room = data.room;
     state.matches = data.matches;
     state.rankings = data.rankings || [];
+    state.circles = data.circles || { active: null, myCircle: null };
     state.stats = data.stats;
     saveCurrentUser();
     if (data.pending || state.user.status === "pending") {
@@ -605,6 +664,7 @@ elements.peopleList.addEventListener("click", async (event) => {
       });
       state.matches = data.matches;
       state.stats = data.stats;
+      state.circles = data.circles || state.circles;
       await loadPeople();
     } catch (error) {
       revokeButton.disabled = false;
@@ -631,6 +691,7 @@ elements.peopleList.addEventListener("click", async (event) => {
     });
     state.matches = data.matches;
     state.stats = data.stats;
+    state.circles = data.circles || state.circles;
     await loadPeople();
   } catch (error) {
     button.disabled = false;
@@ -662,6 +723,7 @@ elements.profileEditForm.addEventListener("submit", async (event) => {
     state.room = data.room;
     state.matches = data.matches;
     state.rankings = data.rankings || [];
+    state.circles = data.circles || { active: null, myCircle: null };
     state.stats = data.stats;
     saveCurrentUser();
     render();
@@ -673,6 +735,11 @@ elements.profileEditForm.addEventListener("submit", async (event) => {
 
 elements.rankingNav.addEventListener("click", async () => {
   setSection("ranking");
+  await refreshCurrentState();
+});
+
+elements.circleNav.addEventListener("click", async () => {
+  setSection("circle");
   await refreshCurrentState();
 });
 
@@ -693,6 +760,7 @@ elements.refreshButton.addEventListener("click", refreshCurrentState);
 elements.profileRefreshButton.addEventListener("click", refreshCurrentState);
 elements.notificationRefreshButton.addEventListener("click", refreshCurrentState);
 elements.rankingRefreshButton.addEventListener("click", refreshCurrentState);
+elements.circleRefreshButton.addEventListener("click", refreshCurrentState);
 
 async function boot() {
   let savedUser = null;

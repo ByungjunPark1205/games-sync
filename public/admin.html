@@ -99,6 +99,50 @@
         </form>
       </section>
 
+      <section class="panel hidden" id="circleAdminPanel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">SYNC Circle</p>
+            <h2>Circle 만들기</h2>
+          </div>
+          <p class="admin-count" id="circleStatus">미공개</p>
+        </div>
+        <form id="circleForm" class="form-stack">
+          <label>
+            <span>Circle 인원수</span>
+            <input id="circleSize" type="number" min="1" step="1" value="4" required />
+          </label>
+          <div class="circle-admin-box">
+            <div class="section-head compact-head">
+              <div>
+                <p class="eyebrow">Fixed Members</p>
+                <h3>무조건 같은 Circle</h3>
+              </div>
+              <button class="ghost-button" id="addFixedGroupButton" type="button">묶음 추가</button>
+            </div>
+            <p class="admin-user-meta">같은 Circle에 넣을 사람들을 2명 이상 선택한 뒤 묶음을 추가하세요.</p>
+            <div class="fixed-member-list" id="fixedMemberList"></div>
+            <div class="fixed-group-list" id="fixedGroupList"></div>
+          </div>
+          <button class="primary-button" type="submit">Circle 미리보기 만들기</button>
+        </form>
+        <div class="circle-preview-block">
+          <div class="section-head compact-head">
+            <div>
+              <p class="eyebrow">Draft</p>
+              <h3>미리보기</h3>
+            </div>
+            <button class="primary-button" id="confirmCircleButton" type="button">확정하기</button>
+          </div>
+          <div class="admin-circle-preview" id="circleDraftPreview"></div>
+        </div>
+        <div class="circle-preview-block">
+          <p class="eyebrow">Published</p>
+          <h3>현재 공개된 Circle</h3>
+          <div class="admin-circle-preview" id="circleActivePreview"></div>
+        </div>
+      </section>
+
       <section class="panel hidden" id="participantsPanel">
         <div class="section-head">
           <div>

@@ -2,7 +2,9 @@ const state = {
   adminKey: localStorage.getItem("gamesSyncAdminKey") || "",
   rooms: [],
   roomCode: "",
-  users: []
+  users: [],
+  circles: { draft: null, active: null },
+  fixedGroups: []
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -11,10 +13,12 @@ const elements = {
   loginPanel: $("#adminLoginPanel"),
   dashboard: $("#adminDashboard"),
   createRoomPanel: $("#createRoomPanel"),
+  circleAdminPanel: $("#circleAdminPanel"),
   participantsPanel: $("#participantsPanel"),
   loginForm: $("#adminLoginForm"),
   settingsForm: $("#adminSettingsForm"),
   createRoomForm: $("#createRoomForm"),
+  circleForm: $("#circleForm"),
   adminKey: $("#adminKey"),
   adminLoginError: $("#adminLoginError"),
   roomSelect: $("#roomSelect"),
@@ -28,6 +32,14 @@ const elements = {
   newRoomSignalLimit: $("#newRoomSignalLimit"),
   newRoomOpenSignalLimit: $("#newRoomOpenSignalLimit"),
   newRoomRevokeLimit: $("#newRoomRevokeLimit"),
+  circleSize: $("#circleSize"),
+  circleStatus: $("#circleStatus"),
+  fixedMemberList: $("#fixedMemberList"),
+  fixedGroupList: $("#fixedGroupList"),
+  addFixedGroupButton: $("#addFixedGroupButton"),
+  circleDraftPreview: $("#circleDraftPreview"),
+  circleActivePreview: $("#circleActivePreview"),
+  confirmCircleButton: $("#confirmCircleButton"),
   adminRefresh: $("#adminRefresh"),
   adminCount: $("#adminCount"),
   adminUserList: $("#adminUserList"),
@@ -67,6 +79,7 @@ function setDashboardVisible(visible) {
   elements.loginPanel.classList.toggle("hidden", visible);
   elements.dashboard.classList.toggle("hidden", !visible);
   elements.createRoomPanel.classList.toggle("hidden", !visible);
+  elements.circleAdminPanel.classList.toggle("hidden", !visible);
   elements.participantsPanel.classList.toggle("hidden", !visible);
 }
 
@@ -135,6 +148,97 @@ function renderUsers() {
     .join("");
 }
 
+function approvedUsers() {
+  return state.users.filter((user) => user.status === "approved");
+}
+
+function userName(userId) {
+  return state.users.find((user) => user.id === userId)?.nickname || "알 수 없음";
+}
+
+function renderFixedMemberList() {
+  const users = approvedUsers();
+  if (!users.length) {
+    elements.fixedMemberList.innerHTML = `<div class="empty-state">승인된 참가자가 있어야 Circle을 만들 수 있어요.</div>`;
+    return;
+  }
+
+  const fixedUserIds = new Set(state.fixedGroups.flat());
+  elements.fixedMemberList.innerHTML = users
+    .map(
+      (user) => `
+        <label class="fixed-member-option ${fixedUserIds.has(user.id) ? "disabled-option" : ""}">
+          <input type="checkbox" value="${escapeHtml(user.id)}" ${fixedUserIds.has(user.id) ? "disabled" : ""} />
+          <span>
+            <strong>${escapeHtml(user.nickname)}</strong>
+            <small>${escapeHtml(user.affiliationLabel || "")}</small>
+          </span>
+        </label>
+      `
+    )
+    .join("");
+}
+
+function renderFixedGroups() {
+  if (!state.fixedGroups.length) {
+    elements.fixedGroupList.innerHTML = `<div class="empty-state compact-empty">아직 고정 묶음이 없어요.</div>`;
+    return;
+  }
+
+  elements.fixedGroupList.innerHTML = state.fixedGroups
+    .map(
+      (group, index) => `
+        <div class="fixed-group-chip">
+          <span>${group.map(userName).map(escapeHtml).join(" · ")}</span>
+          <button type="button" data-remove-fixed="${index}" aria-label="고정 묶음 삭제">삭제</button>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderCirclePlan(plan, emptyMessage) {
+  if (!plan || !plan.groups?.length) {
+    return `<div class="empty-state">${emptyMessage}</div>`;
+  }
+
+  return plan.groups
+    .map(
+      (group) => `
+        <article class="admin-circle-card">
+          <div class="circle-card-head">
+            <span>${escapeHtml(group.name)}</span>
+            <strong>${group.members.length}명</strong>
+          </div>
+          <div class="admin-circle-members">
+            ${group.members
+              .map(
+                (member) => `
+                  <div>
+                    <strong>${escapeHtml(member.nickname)}</strong>
+                    <span>${escapeHtml(member.affiliationLabel || "")}</span>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderCircleAdmin() {
+  const active = state.circles?.active;
+  const draft = state.circles?.draft;
+  elements.circleStatus.textContent = active ? "공개중" : "미공개";
+  elements.confirmCircleButton.disabled = !draft;
+  elements.circleDraftPreview.innerHTML = renderCirclePlan(draft, "아직 Circle 미리보기가 없어요.");
+  elements.circleActivePreview.innerHTML = renderCirclePlan(active, "아직 공개된 Circle이 없어요.");
+  renderFixedMemberList();
+  renderFixedGroups();
+}
+
 function renderStorage() {
   if (!state.storage) {
     elements.adminStorageStatus.textContent = "";
@@ -162,8 +266,11 @@ async function loadDashboard(roomCode = state.roomCode) {
   state.storage = data.storage;
   applyRoom(data.room || data.rooms[0]);
   state.users = data.users;
+  state.circles = data.circles || { draft: null, active: null };
+  state.fixedGroups = state.circles.draft?.fixedGroups || [];
   renderRooms();
   renderUsers();
+  renderCircleAdmin();
   renderStorage();
   setDashboardVisible(true);
 }
@@ -233,6 +340,66 @@ elements.createRoomForm.addEventListener("submit", async (event) => {
     await loadDashboard(data.room.code);
   } catch (error) {
     showToast(error.message);
+  }
+});
+
+elements.addFixedGroupButton.addEventListener("click", () => {
+  const selectedIds = Array.from(elements.fixedMemberList.querySelectorAll("input:checked")).map(
+    (input) => input.value
+  );
+  if (selectedIds.length < 2) {
+    elements.circleStatus.textContent = "2명 이상 선택";
+    return;
+  }
+  state.fixedGroups.push(selectedIds);
+  elements.circleStatus.textContent = "고정 묶음 추가됨";
+  renderCircleAdmin();
+});
+
+elements.fixedGroupList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-fixed]");
+  if (!button) return;
+  state.fixedGroups.splice(Number(button.dataset.removeFixed), 1);
+  elements.circleStatus.textContent = "고정 묶음 삭제됨";
+  renderCircleAdmin();
+});
+
+elements.circleForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    const data = await adminRequest("/api/admin/circles/draft", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode,
+        size: elements.circleSize.value,
+        fixedGroups: state.fixedGroups
+      })
+    });
+    state.circles = data.circles;
+    state.fixedGroups = state.circles.draft?.fixedGroups || state.fixedGroups;
+    elements.circleStatus.textContent = "미리보기 생성";
+    renderCircleAdmin();
+  } catch (error) {
+    elements.circleStatus.textContent = error.message;
+  }
+});
+
+elements.confirmCircleButton.addEventListener("click", async () => {
+  elements.confirmCircleButton.disabled = true;
+  try {
+    const data = await adminRequest("/api/admin/circles/confirm", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode
+      })
+    });
+    state.circles = data.circles;
+    state.fixedGroups = [];
+    elements.circleStatus.textContent = "공개중";
+    renderCircleAdmin();
+  } catch (error) {
+    elements.circleStatus.textContent = error.message;
+    elements.confirmCircleButton.disabled = false;
   }
 });
 
