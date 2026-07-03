@@ -94,6 +94,9 @@ DATA_ENCRYPTION_KEY=your-stable-encryption-key
 UPSTASH_REDIS_REST_URL=your-upstash-rest-url
 UPSTASH_REDIS_REST_TOKEN=your-upstash-rest-token
 UPSTASH_STORE_KEY=games-sync:store
+ADMIN_NOTIFY_EMAIL=ahdcj1234@naver.com
+NOTIFY_EMAIL_FROM=Games Sync <onboarding@resend.dev>
+RESEND_API_KEY=your-resend-api-key
 ```
 
 `DATA_ENCRYPTION_KEY`는 데이터가 생성된 뒤 바꾸면 기존 암호화 데이터를 복호화할 수 없으므로 유지해야 합니다.

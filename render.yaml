@@ -17,6 +17,12 @@ services:
         sync: false
       - key: UPSTASH_STORE_KEY
         value: games-sync:store
+      - key: ADMIN_NOTIFY_EMAIL
+        value: ahdcj1234@naver.com
+      - key: NOTIFY_EMAIL_FROM
+        value: Games Sync <onboarding@resend.dev>
+      - key: RESEND_API_KEY
+        sync: false
       - key: DATABASE_PATH
         value: /var/data/games-sync.localdb
       - key: ALLOW_DATABASE_BOOTSTRAP

@@ -22,6 +22,9 @@ const UPSTASH_REDIS_REST_URL = cleanText(process.env.UPSTASH_REDIS_REST_URL, 300
 const UPSTASH_REDIS_REST_TOKEN = cleanText(process.env.UPSTASH_REDIS_REST_TOKEN, 500);
 const UPSTASH_STORE_KEY = cleanText(process.env.UPSTASH_STORE_KEY || "games-sync:store", 160);
 const USE_UPSTASH_STORE = Boolean(UPSTASH_REDIS_REST_URL && UPSTASH_REDIS_REST_TOKEN);
+const ADMIN_NOTIFY_EMAIL = cleanText(process.env.ADMIN_NOTIFY_EMAIL || "ahdcj1234@naver.com", 180);
+const NOTIFY_EMAIL_FROM = cleanText(process.env.NOTIFY_EMAIL_FROM || "Games Sync <onboarding@resend.dev>", 180);
+const RESEND_API_KEY = cleanText(process.env.RESEND_API_KEY, 500);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATABASE_ALGORITHM = "aes-256-gcm";
 
@@ -98,6 +101,15 @@ function createRoom(code, values = {}) {
 
 function cleanText(value, maxLength) {
   return String(value || "").trim().slice(0, maxLength);
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function cleanHeaderText(value, maxLength) {
@@ -575,6 +587,76 @@ function requestOrigin(req) {
   return `${proto}://${host}`;
 }
 
+function notificationAdminUrl(req) {
+  return `${requestOrigin(req)}/admin`;
+}
+
+function plainTextLine(value, fallback = "-") {
+  const text = cleanText(value, 240);
+  return text || fallback;
+}
+
+function pendingUserEmailPayload(req, room, user) {
+  const adminUrl = notificationAdminUrl(req);
+  const tags = affiliationLabel(user);
+  const subject = `[Games Sync] ${room.code} 방에 새 승인 요청이 있어요`;
+  const text = [
+    "Games Sync에 새 참가자 승인 요청이 도착했습니다.",
+    "",
+    `방 코드: ${room.code}`,
+    `닉네임: ${user.nickname}`,
+    `태그: ${tags}`,
+    `상태메시지: ${plainTextLine(user.statusMessage)}`,
+    "",
+    `관리자 페이지: ${adminUrl}`
+  ].join("\n");
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#14213d">
+      <h2 style="margin:0 0 12px;color:#0a1223">새 참가자 승인 요청</h2>
+      <p style="margin:0 0 16px">Games Sync에 새 참가자가 입장을 요청했습니다.</p>
+      <table style="border-collapse:collapse;width:100%;max-width:520px">
+        <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">방 코드</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(room.code)}</td></tr>
+        <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">닉네임</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(user.nickname)}</td></tr>
+        <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">태그</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(tags)}</td></tr>
+        <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">상태메시지</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(plainTextLine(user.statusMessage))}</td></tr>
+      </table>
+      <p style="margin:18px 0 0">
+        <a href="${escapeHtml(adminUrl)}" style="display:inline-block;padding:11px 16px;border-radius:10px;background:#2b4c7e;color:#ffffff;text-decoration:none;font-weight:700">관리자 페이지 열기</a>
+      </p>
+    </div>
+  `;
+
+  return { subject, text, html };
+}
+
+async function sendPendingUserEmail(req, room, user) {
+  if (!RESEND_API_KEY || !ADMIN_NOTIFY_EMAIL) {
+    console.warn("Pending user email skipped: RESEND_API_KEY or ADMIN_NOTIFY_EMAIL is not configured.");
+    return;
+  }
+
+  const payload = pendingUserEmailPayload(req, room, user);
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${RESEND_API_KEY}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      from: NOTIFY_EMAIL_FROM,
+      to: [ADMIN_NOTIFY_EMAIL],
+      subject: payload.subject,
+      text: payload.text,
+      html: payload.html
+    })
+  });
+
+  if (!response.ok) {
+    const details = cleanText(await response.text().catch(() => ""), 500);
+    throw new Error(`Resend email failed with ${response.status}: ${details}`);
+  }
+}
+
 function renderHtml(html, req) {
   return html.replaceAll("__APP_ORIGIN__", requestOrigin(req));
 }
@@ -1042,6 +1124,7 @@ async function handleSession(req, res, store, room) {
   const password = cleanText(body.password, 120);
   const normalized = normalizeNickname(nickname);
   const tags = parseTags(body);
+  let isNewUser = false;
 
   if (!nickname || !contact || password.length < 4) {
     sendError(res, 400, "닉네임, 연락처, 4자 이상의 비밀번호를 입력해주세요.");
@@ -1061,6 +1144,7 @@ async function handleSession(req, res, store, room) {
     user.affiliationDetail = "";
     user.lastSeenAt = new Date().toISOString();
   } else {
+    isNewUser = true;
     user = {
       id: crypto.randomUUID(),
       nickname,
@@ -1085,6 +1169,11 @@ async function handleSession(req, res, store, room) {
   room.updatedAt = new Date().toISOString();
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
+  if (isNewUser) {
+    await sendPendingUserEmail(req, room, user).catch((error) => {
+      console.error("Failed to send pending user email:", error);
+    });
+  }
   if (!isApprovedUser(user)) {
     sendJson(res, 200, {
       pending: true,
