@@ -23,6 +23,7 @@ const elements = {
   adminLoginError: $("#adminLoginError"),
   roomSelect: $("#roomSelect"),
   adminStorageStatus: $("#adminStorageStatus"),
+  deleteRoomButton: $("#deleteRoomButton"),
   adminEventCode: $("#adminEventCode"),
   adminSignalLimit: $("#adminSignalLimit"),
   adminOpenSignalLimit: $("#adminOpenSignalLimit"),
@@ -124,7 +125,10 @@ function renderUsers() {
           </div>
           ${
             user.status === "pending"
-              ? `<button class="primary-button approve-button" type="button" data-approve="${user.id}">입장 승인</button>`
+              ? `<div class="admin-actions">
+                  <button class="primary-button approve-button" type="button" data-approve="${user.id}">입장 승인</button>
+                  <button class="danger-button reject-button" type="button" data-reject="${user.id}">거절</button>
+                </div>`
               : ""
           }
           <form class="grant-form">
@@ -343,6 +347,26 @@ elements.createRoomForm.addEventListener("submit", async (event) => {
   }
 });
 
+elements.deleteRoomButton.addEventListener("click", async () => {
+  if (!state.roomCode) return;
+  const confirmed = window.confirm(`${state.roomCode} 룸을 삭제할까요? 이 룸의 참가자와 SIGNAL, Circle 데이터가 함께 삭제됩니다.`);
+  if (!confirmed) return;
+  elements.deleteRoomButton.disabled = true;
+  try {
+    const data = await adminRequest("/api/admin/rooms/delete", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode
+      })
+    });
+    await loadDashboard(data.room.code);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    elements.deleteRoomButton.disabled = false;
+  }
+});
+
 elements.addFixedGroupButton.addEventListener("click", () => {
   const selectedIds = Array.from(elements.fixedMemberList.querySelectorAll("input:checked")).map(
     (input) => input.value
@@ -413,6 +437,29 @@ elements.adminRefresh.addEventListener("click", async () => {
 });
 
 elements.adminUserList.addEventListener("click", async (event) => {
+  const rejectButton = event.target.closest("[data-reject]");
+  if (rejectButton) {
+    const card = rejectButton.closest("[data-user]");
+    const user = state.users.find((entry) => entry.id === card?.dataset.user);
+    const confirmed = window.confirm(`${user?.nickname || "해당 참가자"}님의 입장을 거절할까요?`);
+    if (!confirmed) return;
+    rejectButton.disabled = true;
+    try {
+      await adminRequest("/api/admin/users/reject", {
+        method: "POST",
+        body: JSON.stringify({
+          roomCode: state.roomCode,
+          userId: rejectButton.dataset.reject
+        })
+      });
+      await loadDashboard();
+    } catch (error) {
+      rejectButton.disabled = false;
+      showToast(error.message);
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-approve]");
   if (!button) return;
   button.disabled = true;

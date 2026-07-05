@@ -916,6 +916,28 @@ function buildCirclePlan(room, size, rawFixedGroups) {
   };
 }
 
+function removeUserFromCirclePlan(plan, userId) {
+  if (!plan) return null;
+  plan.fixedGroups = (plan.fixedGroups || [])
+    .map((group) => group.filter((id) => id !== userId))
+    .filter((group) => group.length > 1);
+  plan.groups = (plan.groups || [])
+    .map((group) => ({
+      ...group,
+      members: group.members.filter((id) => id !== userId)
+    }))
+    .filter((group) => group.members.length > 0);
+  return plan;
+}
+
+function removeUserFromRoom(room, userId) {
+  room.users = room.users.filter((user) => user.id !== userId);
+  room.likes = room.likes.filter((like) => like.from !== userId && like.to !== userId);
+  room.circles = normalizeCircleState(room.circles);
+  room.circles.draft = removeUserFromCirclePlan(room.circles.draft, userId);
+  room.circles.active = removeUserFromCirclePlan(room.circles.active, userId);
+}
+
 function isApprovedUser(user) {
   return user && user.status === USER_STATUS_APPROVED;
 }
@@ -1164,6 +1186,36 @@ async function handleCreateRoom(req, res) {
   sendJson(res, 200, { ok: true, room: roomSummary(room), rooms: store.rooms.map(roomSummary) });
 }
 
+async function handleDeleteRoom(req, res) {
+  const store = await requireAdmin(req, res);
+  if (!store) return;
+  const body = await readBody(req);
+  const room = roomFromAdminRequest(store, body.roomCode);
+
+  if (!room) {
+    sendError(res, 404, "룸을 찾을 수 없습니다.");
+    return;
+  }
+  if (store.rooms.length <= 1) {
+    sendError(res, 400, "마지막 남은 룸은 삭제할 수 없습니다. 새 룸을 먼저 만든 뒤 삭제해주세요.");
+    return;
+  }
+
+  store.rooms = store.rooms.filter((entry) => entry.id !== room.id);
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+
+  const nextRoom = store.rooms[0];
+  sendJson(res, 200, {
+    ok: true,
+    deletedRoom: roomSummary(room),
+    room: roomSummary(nextRoom),
+    rooms: store.rooms.map(roomSummary),
+    users: nextRoom.users.map((user) => adminUser(nextRoom, user)),
+    circles: adminCirclesPayload(nextRoom)
+  });
+}
+
 async function handleAdminSettings(req, res) {
   const store = await requireAdmin(req, res);
   if (!store) return;
@@ -1326,6 +1378,40 @@ async function handleApproveUser(req, res) {
   store.updatedAt = new Date().toISOString();
   await writeStore(store);
   sendJson(res, 200, { ok: true, user: adminUser(room, user) });
+}
+
+async function handleRejectUser(req, res) {
+  const store = await requireAdmin(req, res);
+  if (!store) return;
+  const body = await readBody(req);
+  const room = roomFromAdminRequest(store, body.roomCode);
+  const userId = cleanText(body.userId, 80);
+
+  if (!room) {
+    sendError(res, 404, "룸을 찾을 수 없습니다.");
+    return;
+  }
+
+  const user = room.users.find((entry) => entry.id === userId);
+  if (!user) {
+    sendError(res, 404, "참가자를 찾을 수 없습니다.");
+    return;
+  }
+  if (user.status !== USER_STATUS_PENDING) {
+    sendError(res, 400, "승인 대기 중인 참가자만 거절할 수 있습니다.");
+    return;
+  }
+
+  removeUserFromRoom(room, user.id);
+  room.updatedAt = new Date().toISOString();
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  sendJson(res, 200, {
+    ok: true,
+    rejectedUser: publicUser(user),
+    users: room.users.map((entry) => adminUser(room, entry)),
+    circles: adminCirclesPayload(room)
+  });
 }
 
 async function handleSession(req, res, store, room) {
@@ -1631,6 +1717,10 @@ async function handleApi(req, res, url) {
     await handleCreateRoom(req, res);
     return;
   }
+  if (req.method === "POST" && url.pathname === "/api/admin/rooms/delete") {
+    await handleDeleteRoom(req, res);
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/api/admin/settings") {
     await handleAdminSettings(req, res);
     return;
@@ -1641,6 +1731,10 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/admin/users/approve") {
     await handleApproveUser(req, res);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/users/reject") {
+    await handleRejectUser(req, res);
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/admin/circles/draft") {

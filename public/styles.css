@@ -497,6 +497,7 @@ select:focus {
 }
 
 .primary-button,
+.danger-button,
 .back-button,
 .ghost-button,
 .tab,
@@ -522,6 +523,16 @@ select:focus {
   box-shadow:
     inset 0 1px 0 rgba(232, 236, 243, 0.25),
     0 12px 34px rgba(47, 111, 231, 0.34);
+}
+
+.danger-button {
+  border: 1px solid rgba(255, 82, 116, 0.42);
+  background: linear-gradient(180deg, rgba(255, 82, 116, 0.88), rgba(145, 32, 56, 0.86));
+  color: #fff8fa;
+  font-weight: 900;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 238, 242, 0.2),
+    0 10px 24px rgba(255, 82, 116, 0.18);
 }
 
 .back-button {
@@ -1548,6 +1559,18 @@ dialog::backdrop {
   word-break: break-all;
 }
 
+.admin-room-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 12px;
+}
+
+.admin-room-actions .danger-button {
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 0.82rem;
+}
+
 .admin-user-list {
   display: grid;
   gap: 10px;
@@ -1584,6 +1607,16 @@ dialog::backdrop {
 }
 
 .approve-button {
+  min-height: 42px;
+}
+
+.admin-actions {
+  display: grid;
+  grid-template-columns: 1fr 0.72fr;
+  gap: 8px;
+}
+
+.reject-button {
   min-height: 42px;
 }
 
@@ -1877,6 +1910,7 @@ dialog::backdrop {
 
   .admin-limits,
   .grant-form,
+  .admin-actions,
   .fixed-member-list,
   .admin-circle-members {
     grid-template-columns: 1fr;
