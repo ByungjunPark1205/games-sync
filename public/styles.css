@@ -799,11 +799,11 @@ select:focus {
 
 .match-card .sync-contact,
 .notification-contact-callout .sync-contact {
-  display: flex;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 0 !important;
   color: #f2fff8 !important;
   font-size: 1.18rem;
@@ -813,16 +813,19 @@ select:focus {
 }
 
 .contact-value {
+  display: block;
   min-width: 0;
   max-width: 100%;
+  padding: 0 2px;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .contact-arrow {
   position: relative;
   display: inline-flex;
   align-items: center;
-  flex: 0 0 34px;
+  width: 30px;
   height: 14px;
   opacity: 0.95;
   filter: drop-shadow(0 0 8px rgba(95, 213, 154, 0.7));
@@ -830,7 +833,7 @@ select:focus {
 
 .contact-arrow::before {
   display: block;
-  width: 30px;
+  width: 26px;
   height: 2px;
   border-radius: 999px;
   background: linear-gradient(90deg, transparent, rgba(177, 255, 213, 0.96));
@@ -840,8 +843,8 @@ select:focus {
 .contact-arrow::after {
   position: absolute;
   right: 1px;
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-top: 2px solid rgba(177, 255, 213, 0.96);
   border-right: 2px solid rgba(177, 255, 213, 0.96);
   transform: rotate(45deg);
@@ -1372,7 +1375,7 @@ select:focus {
 .notification-contact-callout .sync-contact {
   margin-top: 0 !important;
   color: #f2fff8 !important;
-  font-size: 1.08rem;
+  font-size: clamp(0.94rem, 3.7vw, 1.08rem);
   line-height: 1.35;
   text-align: center;
   text-shadow: 0 0 16px rgba(95, 213, 154, 0.34);
@@ -1914,6 +1917,21 @@ dialog::backdrop {
   .like-button,
   .like-button.open {
     min-width: 0;
+  }
+
+  .match-card .sync-contact,
+  .notification-contact-callout .sync-contact {
+    grid-template-columns: 24px minmax(0, 1fr) 24px;
+    gap: 6px;
+    font-size: 1rem;
+  }
+
+  .contact-arrow {
+    width: 24px;
+  }
+
+  .contact-arrow::before {
+    width: 20px;
   }
 
   .admin-limits,
