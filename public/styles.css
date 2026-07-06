@@ -817,8 +817,11 @@ select:focus {
   min-width: 0;
   max-width: 100%;
   padding: 0 2px;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow: visible;
+  overflow-wrap: normal;
+  transform-origin: center;
+  white-space: nowrap;
+  word-break: normal;
 }
 
 .contact-arrow {

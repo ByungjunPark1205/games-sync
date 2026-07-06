@@ -14,6 +14,7 @@ const state = {
 };
 
 let approvalTimer = null;
+let contactFitFrame = null;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -395,6 +396,7 @@ function renderPeople() {
       `;
     })
     .join("");
+  scheduleContactFit();
 }
 
 function notificationItems() {
@@ -473,6 +475,37 @@ function renderNotifications() {
       `
     )
     .join("");
+  scheduleContactFit();
+}
+
+function fitContactValues() {
+  document.querySelectorAll(".contact-value").forEach((value) => {
+    value.style.fontSize = "";
+    value.style.transform = "";
+
+    const parent = value.closest(".sync-contact");
+    const availableWidth = value.clientWidth;
+    if (!parent || availableWidth <= 0) return;
+
+    const baseSize = Number.parseFloat(window.getComputedStyle(parent).fontSize) || 18;
+    value.style.fontSize = `${baseSize}px`;
+
+    const textWidth = value.scrollWidth;
+    if (textWidth <= availableWidth) return;
+
+    const nextSize = Math.max(10, Math.floor(baseSize * ((availableWidth - 2) / textWidth) * 100) / 100);
+    value.style.fontSize = `${nextSize}px`;
+
+    if (value.scrollWidth > availableWidth) {
+      const scale = Math.max(0.76, (availableWidth - 2) / value.scrollWidth);
+      value.style.transform = `scaleX(${scale})`;
+    }
+  });
+}
+
+function scheduleContactFit() {
+  window.cancelAnimationFrame(contactFitFrame);
+  contactFitFrame = window.requestAnimationFrame(fitContactValues);
 }
 
 function renderRankings() {
@@ -761,6 +794,7 @@ elements.profileRefreshButton.addEventListener("click", refreshCurrentState);
 elements.notificationRefreshButton.addEventListener("click", refreshCurrentState);
 elements.rankingRefreshButton.addEventListener("click", refreshCurrentState);
 elements.circleRefreshButton.addEventListener("click", refreshCurrentState);
+window.addEventListener("resize", scheduleContactFit);
 
 async function boot() {
   let savedUser = null;
