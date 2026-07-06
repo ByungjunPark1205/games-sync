@@ -1616,7 +1616,15 @@ dialog::backdrop {
   gap: 8px;
 }
 
+.admin-actions.single-action {
+  grid-template-columns: 1fr;
+}
+
 .reject-button {
+  min-height: 42px;
+}
+
+.kick-button {
   min-height: 42px;
 }
 

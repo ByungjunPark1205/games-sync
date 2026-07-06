@@ -129,7 +129,9 @@ function renderUsers() {
                   <button class="primary-button approve-button" type="button" data-approve="${user.id}">입장 승인</button>
                   <button class="danger-button reject-button" type="button" data-reject="${user.id}">거절</button>
                 </div>`
-              : ""
+              : `<div class="admin-actions single-action">
+                  <button class="danger-button kick-button" type="button" data-remove-user="${user.id}">퇴출</button>
+                </div>`
           }
           <form class="grant-form">
             <label>
@@ -437,6 +439,29 @@ elements.adminRefresh.addEventListener("click", async () => {
 });
 
 elements.adminUserList.addEventListener("click", async (event) => {
+  const removeButton = event.target.closest("[data-remove-user]");
+  if (removeButton) {
+    const card = removeButton.closest("[data-user]");
+    const user = state.users.find((entry) => entry.id === card?.dataset.user);
+    const confirmed = window.confirm(`${user?.nickname || "해당 참가자"}님을 이 룸에서 퇴출할까요? SIGNAL과 Circle 기록에서도 제거됩니다.`);
+    if (!confirmed) return;
+    removeButton.disabled = true;
+    try {
+      await adminRequest("/api/admin/users/remove", {
+        method: "POST",
+        body: JSON.stringify({
+          roomCode: state.roomCode,
+          userId: removeButton.dataset.removeUser
+        })
+      });
+      await loadDashboard();
+    } catch (error) {
+      removeButton.disabled = false;
+      showToast(error.message);
+    }
+    return;
+  }
+
   const rejectButton = event.target.closest("[data-reject]");
   if (rejectButton) {
     const card = rejectButton.closest("[data-user]");

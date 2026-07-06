@@ -1414,6 +1414,36 @@ async function handleRejectUser(req, res) {
   });
 }
 
+async function handleRemoveUser(req, res) {
+  const store = await requireAdmin(req, res);
+  if (!store) return;
+  const body = await readBody(req);
+  const room = roomFromAdminRequest(store, body.roomCode);
+  const userId = cleanText(body.userId, 80);
+
+  if (!room) {
+    sendError(res, 404, "룸을 찾을 수 없습니다.");
+    return;
+  }
+
+  const user = room.users.find((entry) => entry.id === userId);
+  if (!user) {
+    sendError(res, 404, "참가자를 찾을 수 없습니다.");
+    return;
+  }
+
+  removeUserFromRoom(room, user.id);
+  room.updatedAt = new Date().toISOString();
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  sendJson(res, 200, {
+    ok: true,
+    removedUser: publicUser(user),
+    users: room.users.map((entry) => adminUser(room, entry)),
+    circles: adminCirclesPayload(room)
+  });
+}
+
 async function handleSession(req, res, store, room) {
   const body = await readBody(req);
   const nickname = cleanText(body.nickname, 32).replace(/\s+/g, " ");
@@ -1735,6 +1765,10 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/admin/users/reject") {
     await handleRejectUser(req, res);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/users/remove") {
+    await handleRemoveUser(req, res);
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/admin/circles/draft") {
