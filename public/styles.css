@@ -804,26 +804,47 @@ select:focus {
   white-space: nowrap;
 }
 
+.circle-name-chip {
+  gap: 2px;
+  min-height: 50px;
+  align-content: center;
+}
+
 button.person-name-chip,
 button.circle-name-chip {
   cursor: pointer;
 }
 
 .person-name-chip span,
-.circle-name-chip span {
+.circle-name-chip span,
+.circle-name-chip small {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.person-name-chip.synced {
+.circle-name-chip small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.circle-name-chip.is-me small {
+  color: rgba(177, 255, 213, 0.74);
+}
+
+.person-name-chip.synced,
+.circle-name-chip.synced {
   border-color: rgba(95, 213, 154, 0.58);
   background: rgba(95, 213, 154, 0.15);
   color: #b1ffd5;
   box-shadow: 0 0 18px rgba(95, 213, 154, 0.14);
 }
 
-.person-name-chip.open-received {
+.person-name-chip.open-received,
+.circle-name-chip.open-received {
   border-color: rgba(255, 82, 116, 0.58);
   background: rgba(255, 82, 116, 0.14);
   color: #ffc7d2;
@@ -2205,6 +2226,14 @@ dialog::backdrop {
     min-height: 38px;
     padding: 0 4px;
     font-size: 0.74rem;
+  }
+
+  .circle-name-chip {
+    min-height: 48px;
+  }
+
+  .circle-name-chip small {
+    font-size: 0.58rem;
   }
 
   .detail-actions {

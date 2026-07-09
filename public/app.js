@@ -373,6 +373,20 @@ function sortPeopleForDisplay(people) {
   });
 }
 
+function sortCircleMembers(members, { featured = false } = {}) {
+  return [...members].sort((a, b) => {
+    if (featured) {
+      if (a.id === state.user?.id) return -1;
+      if (b.id === state.user?.id) return 1;
+    }
+    const priorityDiff = personDisplayPriority(a) - personDisplayPriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    const groupDiff = primaryGroup(a).localeCompare(primaryGroup(b), "ko");
+    if (groupDiff !== 0) return groupDiff;
+    return a.nickname.localeCompare(b.nickname, "ko");
+  });
+}
+
 function groupedPeople() {
   const groups = new Map();
   [...state.people]
@@ -666,6 +680,7 @@ function renderRankings() {
 
 function renderCircleCard(circle, { featured = false } = {}) {
   if (!circle) return "";
+  const members = sortCircleMembers(circle.members, { featured });
   return `
     <article class="circle-card ${featured ? "my-circle-card" : ""}">
       <div class="circle-card-head">
@@ -673,11 +688,12 @@ function renderCircleCard(circle, { featured = false } = {}) {
         <strong>${circle.members.length}명</strong>
       </div>
       <div class="circle-name-grid">
-        ${circle.members
+        ${members
           .map(
             (member) => `
-              <button class="circle-name-chip ${member.id === state.user?.id ? "is-me" : ""}" type="button" data-person-detail="${member.id}">
-                <span>${escapeHtml(member.nickname)}</span>
+              <button class="circle-name-chip ${personChipClass(member)} ${member.id === state.user?.id ? "is-me" : ""}" type="button" data-person-detail="${member.id}">
+                <span class="circle-nickname">${escapeHtml(member.nickname)}</span>
+                <small>${escapeHtml(groupLabels(member).join(" · "))}</small>
               </button>
             `
           )
