@@ -804,6 +804,11 @@ select:focus {
   white-space: nowrap;
 }
 
+button.person-name-chip,
+button.circle-name-chip {
+  cursor: pointer;
+}
+
 .person-name-chip span,
 .circle-name-chip span {
   max-width: 100%;
@@ -2138,6 +2143,18 @@ dialog::backdrop {
 .detail-sync-state {
   width: 100%;
   min-height: 46px;
+}
+
+.detail-self-note {
+  padding: 12px;
+  border: 1px solid rgba(95, 213, 154, 0.26);
+  border-radius: 13px;
+  background: rgba(95, 213, 154, 0.1);
+  color: #b1ffd5;
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.45;
+  text-align: center;
 }
 
 .hidden {

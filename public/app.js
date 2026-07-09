@@ -343,8 +343,12 @@ function renderStats() {
   `;
 }
 
+function groupLabels(person) {
+  return person.tags?.groups?.length ? person.tags.groups : ["소속 미선택"];
+}
+
 function primaryGroup(person) {
-  return person.tags?.groups?.[0] || "소속 미선택";
+  return groupLabels(person)[0];
 }
 
 function openSignalFrom(personId) {
@@ -360,9 +364,10 @@ function groupedPeople() {
   [...state.people]
     .sort((a, b) => a.nickname.localeCompare(b.nickname, "ko"))
     .forEach((person) => {
-      const label = primaryGroup(person);
-      if (!groups.has(label)) groups.set(label, []);
-      groups.get(label).push(person);
+      groupLabels(person).forEach((label) => {
+        if (!groups.has(label)) groups.set(label, []);
+        groups.get(label).push(person);
+      });
     });
 
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "ko"));
@@ -412,6 +417,7 @@ function renderPeople() {
 }
 
 function personById(personId) {
+  if (state.user?.id === personId) return state.user;
   return state.people.find((person) => person.id === personId) || null;
 }
 
@@ -431,6 +437,10 @@ function tagPills(title, values = []) {
 }
 
 function renderDetailActions(person) {
+  if (person.id === state.user?.id) {
+    return `<div class="detail-self-note">내 정보는 내정보 탭에서 수정할 수 있어요.</div>`;
+  }
+
   const stats = state.stats || {};
   const match = matchFor(person.id);
   if (match) {
@@ -469,7 +479,7 @@ function renderPersonDetail() {
     <div class="person-detail-head ${statusClass}">
       <p class="eyebrow">${match ? "SYNC" : openReceived ? "OPEN SIGNAL" : "Profile"}</p>
       <h2 id="person-detail-title">${escapeHtml(person.nickname)}</h2>
-      <p>${escapeHtml(primaryGroup(person))}</p>
+      <p>${escapeHtml(groupLabels(person).join(" · "))}</p>
     </div>
     <div class="detail-tags">
       ${tagPills("소속태그", person.tags?.groups || [])}
@@ -650,7 +660,9 @@ function renderCircleCard(circle, { featured = false } = {}) {
         ${circle.members
           .map(
             (member) => `
-              <span class="circle-name-chip ${member.id === state.user?.id ? "is-me" : ""}"><span>${escapeHtml(member.nickname)}</span></span>
+              <button class="circle-name-chip ${member.id === state.user?.id ? "is-me" : ""}" type="button" data-person-detail="${member.id}">
+                <span>${escapeHtml(member.nickname)}</span>
+              </button>
             `
           )
           .join("")}
@@ -841,6 +853,15 @@ elements.peopleList.addEventListener("click", async (event) => {
   if (!detailButton) return;
   openPersonDetail(detailButton.dataset.personDetail);
 });
+
+function handlePersonDetailClick(event) {
+  const detailButton = event.target.closest("[data-person-detail]");
+  if (!detailButton) return;
+  openPersonDetail(detailButton.dataset.personDetail);
+}
+
+elements.myCirclePanel.addEventListener("click", handlePersonDetailClick);
+elements.circleList.addEventListener("click", handlePersonDetailClick);
 
 elements.personDetailClose.addEventListener("click", closePersonDetail);
 elements.personDetailSheet.addEventListener("click", async (event) => {
