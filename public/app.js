@@ -359,6 +359,20 @@ function matchFor(personId) {
   return state.matches.find((match) => match.id === personId) || null;
 }
 
+function personDisplayPriority(person) {
+  if (matchFor(person.id)) return 0;
+  if (openSignalFrom(person.id)) return 1;
+  return 2;
+}
+
+function sortPeopleForDisplay(people) {
+  return [...people].sort((a, b) => {
+    const priorityDiff = personDisplayPriority(a) - personDisplayPriority(b);
+    if (priorityDiff !== 0) return priorityDiff;
+    return a.nickname.localeCompare(b.nickname, "ko");
+  });
+}
+
 function groupedPeople() {
   const groups = new Map();
   [...state.people]
@@ -370,7 +384,9 @@ function groupedPeople() {
       });
     });
 
-  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "ko"));
+  return [...groups.entries()]
+    .map(([label, people]) => [label, sortPeopleForDisplay(people)])
+    .sort(([labelA, peopleA], [labelB, peopleB]) => peopleB.length - peopleA.length || labelA.localeCompare(labelB, "ko"));
 }
 
 function personChipClass(person) {
