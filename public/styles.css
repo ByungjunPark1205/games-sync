@@ -2063,16 +2063,9 @@ dialog::backdrop {
 }
 
 .person-detail-head h2 {
-  margin: 4px 0 4px;
+  margin: 4px 0 0;
   color: var(--off-white);
   font-size: 1.52rem;
-}
-
-.person-detail-head p:not(.eyebrow) {
-  margin: 0;
-  color: var(--muted-sky);
-  font-size: 0.88rem;
-  font-weight: 850;
 }
 
 .person-detail-head.synced h2 {
@@ -2151,6 +2144,7 @@ dialog::backdrop {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-top: 8px;
 }
 
 .detail-actions .like-button {

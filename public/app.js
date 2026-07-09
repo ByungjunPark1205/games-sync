@@ -509,7 +509,6 @@ function renderPersonDetail() {
     <div class="person-detail-head ${statusClass}">
       <p class="eyebrow">${match ? "SYNC" : openReceived ? "OPEN SIGNAL" : "Profile"}</p>
       <h2 id="person-detail-title">${escapeHtml(person.nickname)}</h2>
-      <p>${escapeHtml(groupLabels(person).join(" · "))}</p>
     </div>
     <div class="detail-tags">
       ${tagPills("소속태그", person.tags?.groups || [])}
