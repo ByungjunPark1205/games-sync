@@ -10,7 +10,8 @@ const state = {
   rankings: [],
   circles: { active: null, myCircle: null },
   stats: null,
-  section: "home"
+  section: "home",
+  selectedPersonId: null
 };
 
 let approvalTimer = null;
@@ -57,6 +58,9 @@ const elements = {
   profileEditStatusMessage: $("#profileEditStatusMessage"),
   profileEditContact: $("#profileEditContact"),
   profileEditStatus: $("#profileEditStatus"),
+  personDetailSheet: $("#personDetailSheet"),
+  personDetailContent: $("#personDetailContent"),
+  personDetailClose: $("#personDetailClose"),
   signalGuide: $("#signalGuide"),
   signalGuideClose: $("#signalGuideClose"),
   refreshButton: $("#refreshButton"),
@@ -167,6 +171,8 @@ function fallbackToLogin(message = "저장된 접속 정보가 만료됐어요. 
   state.rankings = [];
   state.circles = { active: null, myCircle: null };
   state.stats = null;
+  state.selectedPersonId = null;
+  elements.personDetailSheet.classList.add("hidden");
   fillLoginFormFromUser(savedUser);
   setView("login");
   showToast(message);
@@ -260,6 +266,8 @@ function returnToGate() {
   state.rankings = [];
   state.circles = { active: null, myCircle: null };
   state.stats = null;
+  state.selectedPersonId = null;
+  elements.personDetailSheet.classList.add("hidden");
   elements.eventCode.value = "";
   showGateError();
   setView("gate");
@@ -335,68 +343,166 @@ function renderStats() {
   `;
 }
 
+function primaryGroup(person) {
+  return person.tags?.groups?.[0] || "소속 미선택";
+}
+
+function openSignalFrom(personId) {
+  return (state.stats?.openSignals || []).find((person) => person.id === personId) || null;
+}
+
+function matchFor(personId) {
+  return state.matches.find((match) => match.id === personId) || null;
+}
+
+function groupedPeople() {
+  const groups = new Map();
+  [...state.people]
+    .sort((a, b) => a.nickname.localeCompare(b.nickname, "ko"))
+    .forEach((person) => {
+      const label = primaryGroup(person);
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(person);
+    });
+
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "ko"));
+}
+
+function personChipClass(person) {
+  if (matchFor(person.id)) return "synced";
+  if (openSignalFrom(person.id)) return "open-received";
+  return "";
+}
+
 function renderPeople() {
   if (!state.people.length) {
     elements.peopleList.innerHTML = `<div class="empty-state">아직 표시할 참가자가 없어요. 친구들이 들어오면 여기에 나타납니다.</div>`;
     return;
   }
 
-  const stats = state.stats || {};
-  const matchById = new Map(state.matches.map((match) => [match.id, match]));
-  const sortedPeople = [...state.people].sort((a, b) => {
-    const aMatch = matchById.get(a.id);
-    const bMatch = matchById.get(b.id);
-    if (aMatch && bMatch) return new Date(bMatch.matchedAt) - new Date(aMatch.matchedAt);
-    return Number(Boolean(bMatch)) - Number(Boolean(aMatch));
-  });
+  elements.peopleList.innerHTML = `
+    <div class="people-summary">
+      <strong>총 ${state.people.length}명</strong>
+      <span>소속태그별로 모아봤어요.</span>
+    </div>
+    ${groupedPeople()
+      .map(
+        ([label, people]) => `
+          <section class="people-group">
+            <div class="people-group-head">
+              <h3>${escapeHtml(label)}</h3>
+              <span>${people.length}명</span>
+            </div>
+            <div class="name-grid">
+              ${people
+                .map(
+                  (person) => `
+                    <button class="person-name-chip ${personChipClass(person)}" type="button" data-person-detail="${person.id}">
+                      <span>${escapeHtml(person.nickname)}</span>
+                    </button>
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
+        `
+      )
+      .join("")}
+  `;
+}
 
-  elements.peopleList.innerHTML = sortedPeople
-    .map((person) => {
-      const match = matchById.get(person.id);
-      const isSynced = Boolean(match);
-      return `
-        <article class="person-card ${isSynced ? "match-card" : ""}">
-          <div>
-            <h3>${escapeHtml(person.nickname)}</h3>
-            <p class="affiliation-chip">${escapeHtml(tagsText(person.tags))}</p>
-            ${person.statusMessage ? `<p class="status-message">${escapeHtml(person.statusMessage)}</p>` : ""}
-            ${
-              isSynced
-                ? `<div class="sync-contact-callout" aria-label="SYNC 연락처 안내">
-                    <p class="contact-line sync-contact">
-                      <span class="contact-arrow contact-arrow-left" aria-hidden="true"></span>
-                      <span class="contact-value">${escapeHtml(match.contact)}</span>
-                      <span class="contact-arrow contact-arrow-right" aria-hidden="true"></span>
-                    </p>
-                    <p class="sync-help">여기로 연락해보세요!</p>
-                  </div>`
-                : `<p>마음이 가면 SIGNAL을 보내세요.</p>`
-            }
-          </div>
-          <div class="signal-actions">
-            ${
-              isSynced
-                ? `<div class="sync-state" aria-label="SYNC 완료">SYNC</div>`
-                : `
-                  <button class="like-button ${person.signalSent ? "liked" : ""}" type="button" data-like="${person.id}" data-type="${SIGNAL}" ${person.signalSent || stats.signalRemaining <= 0 ? "disabled" : ""}>
-                    SIGNAL
-                  </button>
-                  ${
-                    person.signalSent
-                      ? `<button class="like-button revoke" type="button" data-revoke="${person.id}" ${stats.revokeRemaining <= 0 ? "disabled" : ""}>SIGNAL 회수</button>`
-                      : ""
-                  }
-                  <button class="like-button open ${person.openSignalSent ? "open-sent" : ""}" type="button" data-like="${person.id}" data-type="${OPEN_SIGNAL}" ${person.openSignalSent || stats.openSignalRemaining <= 0 ? "disabled" : ""}>
-                    OPEN SIGNAL
-                  </button>
-                `
-            }
-          </div>
-        </article>
-      `;
-    })
-    .join("");
+function personById(personId) {
+  return state.people.find((person) => person.id === personId) || null;
+}
+
+function tagPills(title, values = []) {
+  return `
+    <div class="detail-tags-row">
+      <span>${escapeHtml(title)}</span>
+      <div>
+        ${
+          values.length
+            ? values.map((value) => `<b>${escapeHtml(value)}</b>`).join("")
+            : `<em>미선택</em>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderDetailActions(person) {
+  const stats = state.stats || {};
+  const match = matchFor(person.id);
+  if (match) {
+    return `<div class="sync-state detail-sync-state" aria-label="SYNC 완료">SYNC</div>`;
+  }
+
+  return `
+    <div class="detail-actions">
+      <button class="like-button ${person.signalSent ? "liked" : ""}" type="button" data-like="${person.id}" data-type="${SIGNAL}" ${person.signalSent || stats.signalRemaining <= 0 ? "disabled" : ""}>
+        SIGNAL
+      </button>
+      ${
+        person.signalSent
+          ? `<button class="like-button revoke" type="button" data-revoke="${person.id}" ${stats.revokeRemaining <= 0 ? "disabled" : ""}>SIGNAL 회수</button>`
+          : ""
+      }
+      <button class="like-button open ${person.openSignalSent ? "open-sent" : ""}" type="button" data-like="${person.id}" data-type="${OPEN_SIGNAL}" ${person.openSignalSent || stats.openSignalRemaining <= 0 ? "disabled" : ""}>
+        OPEN SIGNAL
+      </button>
+    </div>
+  `;
+}
+
+function renderPersonDetail() {
+  const person = personById(state.selectedPersonId);
+  if (!person) {
+    closePersonDetail();
+    return;
+  }
+
+  const match = matchFor(person.id);
+  const openReceived = openSignalFrom(person.id);
+  const statusClass = match ? "synced" : openReceived ? "open-received" : "";
+
+  elements.personDetailContent.innerHTML = `
+    <div class="person-detail-head ${statusClass}">
+      <p class="eyebrow">${match ? "SYNC" : openReceived ? "OPEN SIGNAL" : "Profile"}</p>
+      <h2 id="person-detail-title">${escapeHtml(person.nickname)}</h2>
+      <p>${escapeHtml(primaryGroup(person))}</p>
+    </div>
+    <div class="detail-tags">
+      ${tagPills("소속태그", person.tags?.groups || [])}
+      ${tagPills("찾는관계", person.tags?.seeking || [])}
+    </div>
+    <div class="detail-message">
+      <span>상태메시지</span>
+      <p>${person.statusMessage ? escapeHtml(person.statusMessage) : "상태메시지 미입력"}</p>
+    </div>
+    ${
+      match
+        ? `<div class="detail-contact-block">${renderNotificationContact(match.contact)}</div>`
+        : openReceived
+          ? `<div class="detail-contact-block timeline-open">
+              ${renderNotificationContact(openReceived.contact)}
+              ${openReceived.note ? `<div class="timeline-message"><strong>내용:</strong><span>${escapeHtml(openReceived.note)}</span></div>` : ""}
+            </div>`
+          : ""
+    }
+    ${renderDetailActions(person)}
+  `;
   scheduleContactFit();
+}
+
+function openPersonDetail(personId) {
+  state.selectedPersonId = personId;
+  renderPersonDetail();
+  elements.personDetailSheet.classList.remove("hidden");
+}
+
+function closePersonDetail() {
+  state.selectedPersonId = null;
+  elements.personDetailSheet.classList.add("hidden");
 }
 
 function notificationItems() {
@@ -540,15 +646,11 @@ function renderCircleCard(circle, { featured = false } = {}) {
         <span>${escapeHtml(circle.name)}</span>
         <strong>${circle.members.length}명</strong>
       </div>
-      <div class="circle-members">
+      <div class="circle-name-grid">
         ${circle.members
           .map(
             (member) => `
-              <div class="circle-member ${member.id === state.user?.id ? "is-me" : ""}">
-                <strong>${escapeHtml(member.nickname)}</strong>
-                <span>${escapeHtml(tagsText(member.tags))}</span>
-                ${member.statusMessage ? `<p>${escapeHtml(member.statusMessage)}</p>` : ""}
-              </div>
+              <span class="circle-name-chip ${member.id === state.user?.id ? "is-me" : ""}"><span>${escapeHtml(member.nickname)}</span></span>
             `
           )
           .join("")}
@@ -583,6 +685,7 @@ function render() {
   renderNotifications();
   renderRankings();
   renderCircles();
+  if (state.selectedPersonId) renderPersonDetail();
 }
 
 function formatTime(value) {
@@ -686,7 +789,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-elements.peopleList.addEventListener("click", async (event) => {
+async function handleSignalAction(event) {
   const revokeButton = event.target.closest("[data-revoke]");
   if (revokeButton) {
     revokeButton.disabled = true;
@@ -707,7 +810,7 @@ elements.peopleList.addEventListener("click", async (event) => {
   }
 
   const button = event.target.closest("[data-like]");
-  if (!button) return;
+  if (!button) return false;
   const targetId = button.dataset.like;
   const type = button.dataset.type;
   const note =
@@ -730,6 +833,22 @@ elements.peopleList.addEventListener("click", async (event) => {
     button.disabled = false;
     showToast(error.message);
   }
+  return true;
+}
+
+elements.peopleList.addEventListener("click", async (event) => {
+  const detailButton = event.target.closest("[data-person-detail]");
+  if (!detailButton) return;
+  openPersonDetail(detailButton.dataset.personDetail);
+});
+
+elements.personDetailClose.addEventListener("click", closePersonDetail);
+elements.personDetailSheet.addEventListener("click", async (event) => {
+  if (event.target === elements.personDetailSheet) {
+    closePersonDetail();
+    return;
+  }
+  await handleSignalAction(event);
 });
 
 elements.profileNav.addEventListener("click", () => {
