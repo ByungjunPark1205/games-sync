@@ -36,6 +36,7 @@ const elements = {
   pendingRefreshButton: $("#pendingRefreshButton"),
   roomBackToCodeButton: $("#roomBackToCodeButton"),
   eventCode: $("#eventCode"),
+  savedEventCodes: $("#savedEventCodes"),
   gateError: $("#gateError"),
   nickname: $("#nickname"),
   statusMessage: $("#statusMessage"),
@@ -93,6 +94,33 @@ function showProfileEditStatus(message = "", isError = false) {
 
 function userStorageKey(code = state.code) {
   return `gamesSyncUser:${code}`;
+}
+
+const savedEventCodesKey = "gamesSyncSavedEventCodes";
+
+function loadSavedEventCodes() {
+  try {
+    const savedCodes = JSON.parse(localStorage.getItem(savedEventCodesKey) || "[]");
+    if (!Array.isArray(savedCodes)) return [];
+    return savedCodes.filter((code) => typeof code === "string" && code.trim());
+  } catch {
+    return [];
+  }
+}
+
+function renderSavedEventCodes() {
+  elements.savedEventCodes.innerHTML = loadSavedEventCodes()
+    .map((code) => `<option value="${escapeHtml(code)}"></option>`)
+    .join("");
+}
+
+function rememberEventCode(code) {
+  const normalizedCode = code.trim();
+  if (!normalizedCode) return;
+  const savedCodes = loadSavedEventCodes().filter((savedCode) => savedCode !== normalizedCode);
+  savedCodes.unshift(normalizedCode);
+  localStorage.setItem(savedEventCodesKey, JSON.stringify(savedCodes.slice(0, 10)));
+  renderSavedEventCodes();
 }
 
 function loadSavedUserForCode(code) {
@@ -766,6 +794,7 @@ async function loadPeople() {
 }
 
 elements.eventCode.addEventListener("input", () => showGateError());
+elements.eventCode.addEventListener("focus", renderSavedEventCodes);
 elements.backToCodeButton.addEventListener("click", returnToGate);
 elements.pendingBackToCodeButton.addEventListener("click", returnToGate);
 elements.pendingRefreshButton.addEventListener("click", () => checkApprovalStatus());
@@ -783,6 +812,7 @@ elements.gateForm.addEventListener("submit", async (event) => {
     });
     state.code = code;
     state.room = data.room;
+    rememberEventCode(code);
     const savedUser = loadSavedUserForCode(code);
     state.user = null;
     sessionStorage.setItem("gamesSyncCode", code);
@@ -968,6 +998,7 @@ elements.circleRefreshButton.addEventListener("click", refreshCurrentState);
 window.addEventListener("resize", scheduleContactFit);
 
 async function boot() {
+  renderSavedEventCodes();
   let savedUser = null;
   if (state.code) {
     elements.eventCode.value = state.code;
