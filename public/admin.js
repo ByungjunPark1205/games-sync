@@ -23,6 +23,7 @@ const elements = {
   adminLoginError: $("#adminLoginError"),
   roomSelect: $("#roomSelect"),
   adminStorageStatus: $("#adminStorageStatus"),
+  resetRoomDataButton: $("#resetRoomDataButton"),
   deleteRoomButton: $("#deleteRoomButton"),
   adminEventCode: $("#adminEventCode"),
   adminSignalLimit: $("#adminSignalLimit"),
@@ -366,6 +367,29 @@ elements.deleteRoomButton.addEventListener("click", async () => {
     showToast(error.message);
   } finally {
     elements.deleteRoomButton.disabled = false;
+  }
+});
+
+elements.resetRoomDataButton.addEventListener("click", async () => {
+  if (!state.roomCode) return;
+  const confirmed = window.confirm(
+    `${state.roomCode} 룸의 SIGNAL, OPEN SIGNAL, Circle, 회수 사용량, 추가 지급량을 초기화할까요?\n\n닉네임, 비밀번호, 연락처, 태그, 상태메시지, 승인상태는 유지됩니다.`
+  );
+  if (!confirmed) return;
+  elements.resetRoomDataButton.disabled = true;
+  try {
+    const data = await adminRequest("/api/admin/rooms/reset-data", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode
+      })
+    });
+    showToast(`${data.room.code} 룸을 초기화했어요. 참가자 ${data.reset.usersCount}명의 로그인정보는 유지됐어요.`);
+    await loadDashboard(data.room.code);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    elements.resetRoomDataButton.disabled = false;
   }
 });
 

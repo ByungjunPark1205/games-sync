@@ -263,6 +263,30 @@ function normalizeRoom(room) {
   return next;
 }
 
+function resetRoomActivity(room) {
+  const resetAt = new Date().toISOString();
+  const removedLikesCount = room.likes.length;
+  const removedCircleCount =
+    (room.circles?.draft?.groups?.length || 0) + (room.circles?.active?.groups?.length || 0);
+
+  room.likes = [];
+  room.circles = normalizeCircleState();
+  room.users.forEach((user) => {
+    user.extraSignalLimit = 0;
+    user.extraOpenSignalLimit = 0;
+    user.extraRevokeLimit = 0;
+    user.revokesUsed = 0;
+  });
+  room.updatedAt = resetAt;
+
+  return {
+    resetAt,
+    usersCount: room.users.length,
+    removedLikesCount,
+    removedCircleCount
+  };
+}
+
 function normalizeStore(store) {
   const next = store && typeof store === "object" ? store : {};
   const adminKeyHash = next.settings?.adminKeyHash || null;
@@ -1216,6 +1240,31 @@ async function handleDeleteRoom(req, res) {
   });
 }
 
+async function handleResetRoomData(req, res) {
+  const store = await requireAdmin(req, res);
+  if (!store) return;
+  const body = await readBody(req);
+  const room = roomFromAdminRequest(store, body.roomCode);
+
+  if (!room) {
+    sendError(res, 404, "룸을 찾을 수 없습니다.");
+    return;
+  }
+
+  const reset = resetRoomActivity(room);
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+
+  sendJson(res, 200, {
+    ok: true,
+    room: roomSummary(room),
+    rooms: store.rooms.map(roomSummary),
+    users: room.users.map((user) => adminUser(room, user)),
+    circles: adminCirclesPayload(room),
+    reset
+  });
+}
+
 async function handleAdminSettings(req, res) {
   const store = await requireAdmin(req, res);
   if (!store) return;
@@ -1253,14 +1302,7 @@ async function handleAdminSettings(req, res) {
     store.settings.adminKeyHash = hashPassword(newAdminKey);
   }
   if (codeChanged) {
-    room.likes = [];
-    room.circles = normalizeCircleState();
-    room.users.forEach((user) => {
-      user.extraSignalLimit = 0;
-      user.extraOpenSignalLimit = 0;
-      user.extraRevokeLimit = 0;
-      user.revokesUsed = 0;
-    });
+    resetRoomActivity(room);
   }
   room.updatedAt = new Date().toISOString();
   store.updatedAt = new Date().toISOString();
@@ -1749,6 +1791,10 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/admin/rooms/delete") {
     await handleDeleteRoom(req, res);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/rooms/reset-data") {
+    await handleResetRoomData(req, res);
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/admin/settings") {

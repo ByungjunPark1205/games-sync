@@ -1698,6 +1698,8 @@ dialog::backdrop {
 
 .admin-room-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
   margin: -4px 0 12px;
 }
