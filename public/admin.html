@@ -127,8 +127,24 @@
             <p class="admin-user-meta">같은 Circle에 넣을 사람들을 2명 이상 선택한 뒤 묶음을 추가하세요.</p>
             <div class="fixed-member-list" id="fixedMemberList"></div>
             <div class="fixed-group-list" id="fixedGroupList"></div>
+            <button class="ghost-button manual-circle-button" id="manualCircleButton" type="button">묶은 대로만 Circle 만들기</button>
           </div>
           <button class="primary-button" type="submit">Circle 미리보기 만들기</button>
+        </form>
+        <form id="circleBannerForm" class="circle-banner-admin form-stack">
+          <div class="section-head compact-head">
+            <div>
+              <p class="eyebrow">Circle Photo</p>
+              <h3>상단 고정 사진</h3>
+            </div>
+            <button class="danger-button" id="clearCircleBannerButton" type="button">삭제</button>
+          </div>
+          <label>
+            <span>사진 업로드</span>
+            <input id="circleBannerInput" type="file" accept="image/png,image/jpeg,image/webp" />
+          </label>
+          <div class="circle-banner-preview empty" id="circleBannerPreview">아직 등록된 사진이 없어요.</div>
+          <button class="primary-button" type="submit">사진 저장</button>
         </form>
         <div class="circle-preview-block">
           <div class="section-head compact-head">

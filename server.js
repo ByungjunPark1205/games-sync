@@ -32,6 +32,8 @@ const SIGNAL = "signal";
 const OPEN_SIGNAL = "open";
 const USER_STATUS_PENDING = "pending";
 const USER_STATUS_APPROVED = "approved";
+const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_CIRCLE_BANNER_BYTES = 900 * 1024;
 const AFFILIATIONS = new Set(["Games", "동물원", "수녀원", "지인소개"]);
 const TAG_OPTIONS = {
   roles: [],
@@ -95,6 +97,7 @@ function createRoom(code, values = {}) {
     users: Array.isArray(values.users) ? values.users : [],
     likes: Array.isArray(values.likes) ? values.likes : [],
     circles: normalizeCircleState(values.circles),
+    circleBanner: normalizeCircleBanner(values.circleBanner),
     createdAt: values.createdAt || new Date().toISOString(),
     updatedAt: values.updatedAt || new Date().toISOString()
   };
@@ -246,6 +249,19 @@ function normalizeCircleState(circles) {
   };
 }
 
+function normalizeCircleBanner(banner) {
+  if (!banner || typeof banner !== "object") return null;
+  const dataUrl = String(banner.dataUrl || "").trim();
+  if (!/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(dataUrl)) return null;
+  if (Buffer.byteLength(dataUrl, "utf8") > MAX_CIRCLE_BANNER_BYTES) return null;
+
+  return {
+    dataUrl,
+    name: cleanText(banner.name, 120),
+    updatedAt: banner.updatedAt || new Date().toISOString()
+  };
+}
+
 function normalizeRoom(room) {
   const code = cleanText(room.code || room.eventCode, 80);
   const next = createRoom(code || "SYNC2026", room);
@@ -260,6 +276,7 @@ function normalizeRoom(room) {
   next.users = Array.isArray(room.users) ? room.users.map(normalizeUser) : [];
   next.likes = normalizeLikes(room.likes);
   next.circles = normalizeCircleState(room.circles);
+  next.circleBanner = normalizeCircleBanner(room.circleBanner);
   return next;
 }
 
@@ -731,7 +748,7 @@ async function readBody(req) {
   let body = "";
   for await (const chunk of req) {
     body += chunk;
-    if (body.length > 1024 * 1024) {
+    if (body.length > MAX_REQUEST_BODY_BYTES) {
       throw new Error("요청 본문이 너무 큽니다.");
     }
   }
@@ -828,6 +845,10 @@ function circleMemberPayload(room, userId) {
   return user ? publicUser(user) : null;
 }
 
+function comparePublicUsersDesc(a, b) {
+  return b.nickname.localeCompare(a.nickname, "ko", { numeric: true, sensitivity: "base" });
+}
+
 function circlePlanPayload(room, plan) {
   if (!plan) {
     return null;
@@ -842,13 +863,17 @@ function circlePlanPayload(room, plan) {
     groups: plan.groups.map((group, index) => ({
       id: group.id,
       name: group.name || `Circle ${index + 1}`,
-      members: group.members.map((userId) => circleMemberPayload(room, userId)).filter(Boolean)
+      members: group.members
+        .map((userId) => circleMemberPayload(room, userId))
+        .filter(Boolean)
+        .sort(comparePublicUsersDesc)
     }))
   };
 }
 
 function adminCirclesPayload(room) {
   return {
+    banner: normalizeCircleBanner(room.circleBanner),
     draft: circlePlanPayload(room, room.circles?.draft),
     active: circlePlanPayload(room, room.circles?.active)
   };
@@ -857,12 +882,13 @@ function adminCirclesPayload(room) {
 function circlePayload(room, userId) {
   const active = circlePlanPayload(room, room.circles?.active);
   if (!active) {
-    return { active: null, myCircle: null };
+    return { active: null, myCircle: null, banner: normalizeCircleBanner(room.circleBanner) };
   }
 
   return {
     active,
-    myCircle: active.groups.find((group) => group.members.some((member) => member.id === userId)) || null
+    myCircle: active.groups.find((group) => group.members.some((member) => member.id === userId)) || null,
+    banner: normalizeCircleBanner(room.circleBanner)
   };
 }
 
@@ -894,7 +920,7 @@ function normalizeFixedGroups(rawGroups, approvedUserIds) {
     });
 }
 
-function buildCirclePlan(room, size, rawFixedGroups) {
+function buildCirclePlan(room, size, rawFixedGroups, mode = "auto") {
   const approvedUsers = room.users.filter(isApprovedUser);
   const approvedUserIds = new Set(approvedUsers.map((user) => user.id));
   const circleSize = Math.max(1, positiveInt(size, 4));
@@ -904,8 +930,27 @@ function buildCirclePlan(room, size, rawFixedGroups) {
   if (!approvedUsers.length) {
     throw new Error("승인된 참가자가 있어야 Circle을 만들 수 있습니다.");
   }
-  if (tooLargeGroup) {
+  if (mode !== "manual" && tooLargeGroup) {
     throw new Error(`고정 그룹 인원이 Circle 인원수 ${circleSize}명을 넘을 수 없습니다.`);
+  }
+
+  if (mode === "manual") {
+    if (!fixedGroups.length) {
+      throw new Error("묶어둔 멤버가 있어야 수동 Circle을 만들 수 있습니다.");
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      size: Math.max(...fixedGroups.map((group) => group.length)),
+      fixedGroups,
+      groups: fixedGroups.map((group, index) => ({
+        id: crypto.randomUUID(),
+        name: `Circle ${index + 1}`,
+        members: [...group]
+      })),
+      createdAt: new Date().toISOString(),
+      confirmedAt: null
+    };
   }
 
   const fixedUserIds = new Set(fixedGroups.flat());
@@ -1358,7 +1403,7 @@ async function handleCircleDraft(req, res) {
 
   try {
     room.circles = normalizeCircleState(room.circles);
-    room.circles.draft = buildCirclePlan(room, body.size, body.fixedGroups);
+    room.circles.draft = buildCirclePlan(room, body.size, body.fixedGroups, body.mode);
     room.updatedAt = new Date().toISOString();
     store.updatedAt = new Date().toISOString();
     await writeStore(store);
@@ -1366,6 +1411,38 @@ async function handleCircleDraft(req, res) {
   } catch (error) {
     sendError(res, 400, error.message);
   }
+}
+
+async function handleCircleBanner(req, res) {
+  const store = await requireAdmin(req, res);
+  if (!store) return;
+  const body = await readBody(req);
+  const room = roomFromAdminRequest(store, body.roomCode);
+
+  if (!room) {
+    sendError(res, 404, "룸을 찾을 수 없습니다.");
+    return;
+  }
+
+  if (body.clear) {
+    room.circleBanner = null;
+  } else {
+    const banner = normalizeCircleBanner({
+      dataUrl: body.dataUrl,
+      name: body.name,
+      updatedAt: new Date().toISOString()
+    });
+    if (!banner) {
+      sendError(res, 400, "이미지는 900KB 이하의 PNG, JPG, WEBP 파일만 사용할 수 있습니다.");
+      return;
+    }
+    room.circleBanner = banner;
+  }
+
+  room.updatedAt = new Date().toISOString();
+  store.updatedAt = new Date().toISOString();
+  await writeStore(store);
+  sendJson(res, 200, { ok: true, circles: adminCirclesPayload(room), room: roomSummary(room) });
 }
 
 async function handleCircleConfirm(req, res) {
@@ -1607,16 +1684,18 @@ async function handleProfile(req, res, store, room) {
 function peoplePayload(room, user) {
   const matches = matchPayload(room, user.id);
   const people = room.users
-    .filter((entry) => entry.id !== user.id && isApprovedUser(entry))
+    .filter((entry) => isApprovedUser(entry))
     .map((entry) => {
-      const signalSent = hasSignalType(room, user.id, entry.id, SIGNAL);
-      const openSignalSent = hasSignalType(room, user.id, entry.id, OPEN_SIGNAL);
+      const isSelf = entry.id === user.id;
+      const signalSent = !isSelf && hasSignalType(room, user.id, entry.id, SIGNAL);
+      const openSignalSent = !isSelf && hasSignalType(room, user.id, entry.id, OPEN_SIGNAL);
       return {
         ...publicUser(entry),
+        isSelf,
         signalSent,
         openSignalSent,
         signaled: signalSent || openSignalSent,
-        synced: matches.some((match) => match.id === entry.id)
+        synced: !isSelf && matches.some((match) => match.id === entry.id)
       };
     });
 
@@ -1819,6 +1898,10 @@ async function handleApi(req, res, url) {
   }
   if (req.method === "POST" && url.pathname === "/api/admin/circles/draft") {
     await handleCircleDraft(req, res);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/admin/circles/banner") {
+    await handleCircleBanner(req, res);
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/admin/circles/confirm") {

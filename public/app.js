@@ -393,11 +393,15 @@ function personDisplayPriority(person) {
   return 2;
 }
 
+function comparePeopleDesc(a, b) {
+  return b.nickname.localeCompare(a.nickname, "ko", { numeric: true, sensitivity: "base" });
+}
+
 function sortPeopleForDisplay(people) {
   return [...people].sort((a, b) => {
     const priorityDiff = personDisplayPriority(a) - personDisplayPriority(b);
     if (priorityDiff !== 0) return priorityDiff;
-    return a.nickname.localeCompare(b.nickname, "ko");
+    return comparePeopleDesc(a, b);
   });
 }
 
@@ -411,14 +415,14 @@ function sortCircleMembers(members, { featured = false } = {}) {
     if (priorityDiff !== 0) return priorityDiff;
     const groupDiff = primaryGroup(a).localeCompare(primaryGroup(b), "ko");
     if (groupDiff !== 0) return groupDiff;
-    return a.nickname.localeCompare(b.nickname, "ko");
+    return comparePeopleDesc(a, b);
   });
 }
 
 function groupedPeople() {
   const groups = new Map();
   [...state.people]
-    .sort((a, b) => a.nickname.localeCompare(b.nickname, "ko"))
+    .sort(comparePeopleDesc)
     .forEach((person) => {
       groupLabels(person).forEach((label) => {
         if (!groups.has(label)) groups.set(label, []);
@@ -428,10 +432,11 @@ function groupedPeople() {
 
   return [...groups.entries()]
     .map(([label, people]) => [label, sortPeopleForDisplay(people)])
-    .sort(([labelA, peopleA], [labelB, peopleB]) => peopleB.length - peopleA.length || labelA.localeCompare(labelB, "ko"));
+    .sort(([labelA, peopleA], [labelB, peopleB]) => peopleB.length - peopleA.length || labelB.localeCompare(labelA, "ko"));
 }
 
 function personChipClass(person) {
+  if (person.id === state.user?.id) return "is-me";
   if (matchFor(person.id)) return "synced";
   if (openSignalFrom(person.id)) return "open-received";
   return "";
@@ -730,12 +735,23 @@ function renderCircleCard(circle, { featured = false } = {}) {
   `;
 }
 
+function renderCircleBanner(banner) {
+  if (!banner?.dataUrl) return "";
+  return `
+    <figure class="circle-banner">
+      <img src="${banner.dataUrl}" alt="Circle 상단 고정 사진" />
+    </figure>
+  `;
+}
+
 function renderCircles() {
   const circles = state.circles || { active: null, myCircle: null };
   const groups = circles.active?.groups || [];
+  const bannerHtml = renderCircleBanner(circles.banner);
 
   if (!circles.active) {
     elements.myCirclePanel.innerHTML = `
+      ${bannerHtml}
       <div class="empty-state">아직 공개된 Circle이 없어요. 관리자가 Circle을 확정하면 여기에 표시됩니다.</div>
     `;
     elements.circleList.innerHTML = "";
@@ -743,6 +759,7 @@ function renderCircles() {
   }
 
   elements.myCirclePanel.innerHTML = `
+    ${bannerHtml}
     <h3>내 Circle</h3>
     ${circles.myCircle ? renderCircleCard(circles.myCircle, { featured: true }) : `<div class="empty-state">이번 Circle에 아직 포함되지 않았어요.</div>`}
   `;

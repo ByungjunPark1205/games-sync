@@ -4,6 +4,7 @@ const state = {
   roomCode: "",
   users: [],
   circles: { draft: null, active: null },
+  pendingCircleBanner: null,
   fixedGroups: []
 };
 
@@ -36,9 +37,14 @@ const elements = {
   newRoomRevokeLimit: $("#newRoomRevokeLimit"),
   circleSize: $("#circleSize"),
   circleStatus: $("#circleStatus"),
+  circleBannerForm: $("#circleBannerForm"),
+  circleBannerInput: $("#circleBannerInput"),
+  circleBannerPreview: $("#circleBannerPreview"),
+  clearCircleBannerButton: $("#clearCircleBannerButton"),
   fixedMemberList: $("#fixedMemberList"),
   fixedGroupList: $("#fixedGroupList"),
   addFixedGroupButton: $("#addFixedGroupButton"),
+  manualCircleButton: $("#manualCircleButton"),
   circleDraftPreview: $("#circleDraftPreview"),
   circleActivePreview: $("#circleActivePreview"),
   confirmCircleButton: $("#confirmCircleButton"),
@@ -92,6 +98,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function compareUsersDesc(a, b) {
+  return b.nickname.localeCompare(a.nickname, "ko", { numeric: true, sensitivity: "base" });
 }
 
 function renderRooms() {
@@ -156,7 +166,7 @@ function renderUsers() {
 }
 
 function approvedUsers() {
-  return state.users.filter((user) => user.status === "approved");
+  return state.users.filter((user) => user.status === "approved").sort(compareUsersDesc);
 }
 
 function userName(userId) {
@@ -219,6 +229,8 @@ function renderCirclePlan(plan, emptyMessage) {
           </div>
           <div class="admin-circle-members">
             ${group.members
+              .slice()
+              .sort(compareUsersDesc)
               .map(
                 (member) => `
                   <div>
@@ -235,6 +247,23 @@ function renderCirclePlan(plan, emptyMessage) {
     .join("");
 }
 
+function renderCircleBannerAdmin() {
+  const banner = state.pendingCircleBanner || state.circles?.banner;
+  if (!banner?.dataUrl) {
+    elements.circleBannerPreview.classList.add("empty");
+    elements.circleBannerPreview.innerHTML = "아직 등록된 사진이 없어요.";
+    elements.clearCircleBannerButton.disabled = true;
+    return;
+  }
+
+  elements.circleBannerPreview.classList.remove("empty");
+  elements.circleBannerPreview.innerHTML = `
+    <img src="${banner.dataUrl}" alt="Circle 상단 고정 사진" />
+    <span>${escapeHtml(banner.name || "Circle photo")}</span>
+  `;
+  elements.clearCircleBannerButton.disabled = false;
+}
+
 function renderCircleAdmin() {
   const active = state.circles?.active;
   const draft = state.circles?.draft;
@@ -242,6 +271,7 @@ function renderCircleAdmin() {
   elements.confirmCircleButton.disabled = !draft;
   elements.circleDraftPreview.innerHTML = renderCirclePlan(draft, "아직 Circle 미리보기가 없어요.");
   elements.circleActivePreview.innerHTML = renderCirclePlan(active, "아직 공개된 Circle이 없어요.");
+  renderCircleBannerAdmin();
   renderFixedMemberList();
   renderFixedGroups();
 }
@@ -274,12 +304,63 @@ async function loadDashboard(roomCode = state.roomCode) {
   applyRoom(data.room || data.rooms[0]);
   state.users = data.users;
   state.circles = data.circles || { draft: null, active: null };
+  state.pendingCircleBanner = null;
   state.fixedGroups = state.circles.draft?.fixedGroups || [];
   renderRooms();
   renderUsers();
   renderCircleAdmin();
   renderStorage();
   setDashboardVisible(true);
+}
+
+function readImageDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("사진을 읽을 수 없습니다."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("사진 형식을 확인해 주세요."));
+    image.src = dataUrl;
+  });
+}
+
+async function resizeCircleBanner(file) {
+  if (!file) return null;
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    throw new Error("PNG, JPG, WEBP 이미지만 사용할 수 있습니다.");
+  }
+
+  const sourceUrl = await readImageDataUrl(file);
+  const image = await loadImage(sourceUrl);
+  const maxWidth = 1400;
+  const scale = Math.min(1, maxWidth / image.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  let quality = 0.82;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+  while (dataUrl.length > 880 * 1024 && quality > 0.45) {
+    quality -= 0.08;
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+  }
+  if (dataUrl.length > 880 * 1024) {
+    throw new Error("사진 용량이 너무 큽니다. 조금 더 작은 사진을 선택해 주세요.");
+  }
+
+  return {
+    dataUrl,
+    name: file.name
+  };
 }
 
 elements.loginForm.addEventListener("submit", async (event) => {
@@ -431,6 +512,100 @@ elements.circleForm.addEventListener("submit", async (event) => {
     renderCircleAdmin();
   } catch (error) {
     elements.circleStatus.textContent = error.message;
+  }
+});
+
+elements.manualCircleButton.addEventListener("click", async () => {
+  if (!state.fixedGroups.length) {
+    elements.circleStatus.textContent = "묶음을 먼저 추가";
+    return;
+  }
+
+  elements.manualCircleButton.disabled = true;
+  try {
+    const data = await adminRequest("/api/admin/circles/draft", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode,
+        size: elements.circleSize.value,
+        fixedGroups: state.fixedGroups,
+        mode: "manual"
+      })
+    });
+    state.circles = data.circles;
+    state.fixedGroups = state.circles.draft?.fixedGroups || state.fixedGroups;
+    elements.circleStatus.textContent = "수동 미리보기 생성";
+    renderCircleAdmin();
+  } catch (error) {
+    elements.circleStatus.textContent = error.message;
+  } finally {
+    elements.manualCircleButton.disabled = false;
+  }
+});
+
+elements.circleBannerInput.addEventListener("change", async () => {
+  const file = elements.circleBannerInput.files?.[0];
+  if (!file) {
+    state.pendingCircleBanner = null;
+    renderCircleBannerAdmin();
+    return;
+  }
+
+  try {
+    state.pendingCircleBanner = await resizeCircleBanner(file);
+    renderCircleBannerAdmin();
+  } catch (error) {
+    state.pendingCircleBanner = null;
+    elements.circleBannerInput.value = "";
+    showToast(error.message);
+    renderCircleBannerAdmin();
+  }
+});
+
+elements.circleBannerForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.pendingCircleBanner) {
+    showToast("저장할 사진을 먼저 선택해 주세요.");
+    return;
+  }
+
+  try {
+    const data = await adminRequest("/api/admin/circles/banner", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode,
+        dataUrl: state.pendingCircleBanner.dataUrl,
+        name: state.pendingCircleBanner.name
+      })
+    });
+    state.circles = data.circles;
+    state.pendingCircleBanner = null;
+    elements.circleBannerInput.value = "";
+    showToast("Circle 상단 사진을 저장했어요.");
+    renderCircleAdmin();
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+
+elements.clearCircleBannerButton.addEventListener("click", async () => {
+  const confirmed = window.confirm("Circle 상단 사진을 삭제할까요?");
+  if (!confirmed) return;
+  try {
+    const data = await adminRequest("/api/admin/circles/banner", {
+      method: "POST",
+      body: JSON.stringify({
+        roomCode: state.roomCode,
+        clear: true
+      })
+    });
+    state.circles = data.circles;
+    state.pendingCircleBanner = null;
+    elements.circleBannerInput.value = "";
+    showToast("Circle 상단 사진을 삭제했어요.");
+    renderCircleAdmin();
+  } catch (error) {
+    showToast(error.message);
   }
 });
 
