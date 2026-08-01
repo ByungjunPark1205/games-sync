@@ -100,8 +100,8 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function compareUsersDesc(a, b) {
-  return b.nickname.localeCompare(a.nickname, "ko", { numeric: true, sensitivity: "base" });
+function compareUsersAsc(a, b) {
+  return a.nickname.localeCompare(b.nickname, "ko", { numeric: true, sensitivity: "base" });
 }
 
 function renderRooms() {
@@ -166,7 +166,7 @@ function renderUsers() {
 }
 
 function approvedUsers() {
-  return state.users.filter((user) => user.status === "approved").sort(compareUsersDesc);
+  return state.users.filter((user) => user.status === "approved").sort(compareUsersAsc);
 }
 
 function userName(userId) {
@@ -230,7 +230,7 @@ function renderCirclePlan(plan, emptyMessage) {
           <div class="admin-circle-members">
             ${group.members
               .slice()
-              .sort(compareUsersDesc)
+              .sort(compareUsersAsc)
               .map(
                 (member) => `
                   <div>

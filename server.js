@@ -845,8 +845,8 @@ function circleMemberPayload(room, userId) {
   return user ? publicUser(user) : null;
 }
 
-function comparePublicUsersDesc(a, b) {
-  return b.nickname.localeCompare(a.nickname, "ko", { numeric: true, sensitivity: "base" });
+function comparePublicUsersAsc(a, b) {
+  return a.nickname.localeCompare(b.nickname, "ko", { numeric: true, sensitivity: "base" });
 }
 
 function circlePlanPayload(room, plan) {
@@ -866,7 +866,7 @@ function circlePlanPayload(room, plan) {
       members: group.members
         .map((userId) => circleMemberPayload(room, userId))
         .filter(Boolean)
-        .sort(comparePublicUsersDesc)
+        .sort(comparePublicUsersAsc)
     }))
   };
 }

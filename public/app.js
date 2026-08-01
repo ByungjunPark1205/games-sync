@@ -393,15 +393,15 @@ function personDisplayPriority(person) {
   return 2;
 }
 
-function comparePeopleDesc(a, b) {
-  return b.nickname.localeCompare(a.nickname, "ko", { numeric: true, sensitivity: "base" });
+function comparePeopleAsc(a, b) {
+  return a.nickname.localeCompare(b.nickname, "ko", { numeric: true, sensitivity: "base" });
 }
 
 function sortPeopleForDisplay(people) {
   return [...people].sort((a, b) => {
     const priorityDiff = personDisplayPriority(a) - personDisplayPriority(b);
     if (priorityDiff !== 0) return priorityDiff;
-    return comparePeopleDesc(a, b);
+    return comparePeopleAsc(a, b);
   });
 }
 
@@ -415,14 +415,14 @@ function sortCircleMembers(members, { featured = false } = {}) {
     if (priorityDiff !== 0) return priorityDiff;
     const groupDiff = primaryGroup(a).localeCompare(primaryGroup(b), "ko");
     if (groupDiff !== 0) return groupDiff;
-    return comparePeopleDesc(a, b);
+    return comparePeopleAsc(a, b);
   });
 }
 
 function groupedPeople() {
   const groups = new Map();
   [...state.people]
-    .sort(comparePeopleDesc)
+    .sort(comparePeopleAsc)
     .forEach((person) => {
       groupLabels(person).forEach((label) => {
         if (!groups.has(label)) groups.set(label, []);
@@ -432,7 +432,7 @@ function groupedPeople() {
 
   return [...groups.entries()]
     .map(([label, people]) => [label, sortPeopleForDisplay(people)])
-    .sort(([labelA, peopleA], [labelB, peopleB]) => peopleB.length - peopleA.length || labelB.localeCompare(labelA, "ko"));
+    .sort(([labelA, peopleA], [labelB, peopleB]) => peopleB.length - peopleA.length || labelA.localeCompare(labelB, "ko"));
 }
 
 function personChipClass(person) {
