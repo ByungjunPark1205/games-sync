@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "games-sync",
+  "main": "cloudflare/worker.mjs",
+  "compatibility_date": "2026-09-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": ["/api/*", "/", "/index.html", "/admin", "/admin/", "/admin.html"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "GAME_STORE", "class_name": "GameStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameStore"] }],
+  "vars": {
+    "ALLOW_DATABASE_BOOTSTRAP": "false"
+  },
+  "observability": { "enabled": true }
+}

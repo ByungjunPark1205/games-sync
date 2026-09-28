@@ -5,9 +5,19 @@
   "description": "Private event matching page for Games Sync.",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "dev:cloudflare": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check:cloudflare": "wrangler deploy --dry-run",
+    "test": "node --test tests/*.test.mjs",
+    "pretest": "wrangler deploy --dry-run --outdir dist"
   },
   "engines": {
-    "node": ">=18"
-  }
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "miniflare": "5.20260925.0-alpha",
+    "wrangler": "4.141.0"
+  },
+  "packageManager": "pnpm@11.19.0"
 }

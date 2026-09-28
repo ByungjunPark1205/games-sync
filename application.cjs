@@ -1,0 +1,2031 @@
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { Buffer } = require("node:buffer");
+
+// Both Node.js and Cloudflare use the same matching and administration logic.
+function createApplication({ env = process.env, storage = null } = {}) {
+  const PORT = Number(env.PORT || 3000);
+  const ADMIN_KEY = env.ADMIN_KEY || (storage ? "" : "games-admin");
+  const DATABASE_PATH =
+    storage ? "" : env.DATABASE_PATH || env.STORE_PATH || path.join(__dirname, "data", "games-sync.localdb");
+  const LEGACY_STORE_PATH = env.LEGACY_STORE_PATH || "";
+  const DATA_KEY_PATH = env.DATA_KEY_PATH || path.join(path.dirname(DATABASE_PATH), "encryption.key");
+  const HAS_CONFIGURED_DATA_KEY = Boolean(env.DATA_ENCRYPTION_KEY || env.DB_ENCRYPTION_KEY);
+  const HAS_EXPLICIT_DATABASE_PATH = Boolean(env.DATABASE_PATH || env.STORE_PATH);
+  const IS_RENDER = env.RENDER === "true" || Boolean(env.RENDER_SERVICE_ID);
+  const ALLOW_DATABASE_BOOTSTRAP =
+    env.ALLOW_DATABASE_BOOTSTRAP === "true" || (!storage && !IS_RENDER && !HAS_EXPLICIT_DATABASE_PATH);
+  const DATABASE_BACKUP_DIR =
+    env.DATABASE_BACKUP_DIR || path.join(path.dirname(DATABASE_PATH), "backups");
+  const MAX_DATABASE_BACKUPS = positiveInt(env.MAX_DATABASE_BACKUPS, 30);
+  const UPSTASH_REDIS_REST_URL = cleanText(env.UPSTASH_REDIS_REST_URL, 300).replace(/\/+$/, "");
+  const UPSTASH_REDIS_REST_TOKEN = cleanText(env.UPSTASH_REDIS_REST_TOKEN, 500);
+  const UPSTASH_STORE_KEY = cleanText(env.UPSTASH_STORE_KEY || "games-sync:store", 160);
+  const USE_UPSTASH_STORE = Boolean(UPSTASH_REDIS_REST_URL && UPSTASH_REDIS_REST_TOKEN);
+  const ADMIN_NOTIFY_EMAIL = cleanText(env.ADMIN_NOTIFY_EMAIL || "ahdcj1234@naver.com", 180);
+  const NOTIFY_EMAIL_FROM = cleanText(env.NOTIFY_EMAIL_FROM || "Games Sync <onboarding@resend.dev>", 180);
+  const RESEND_API_KEY = cleanText(env.RESEND_API_KEY, 500);
+  const PUBLIC_DIR = storage ? "" : path.join(__dirname, "public");
+  const DATABASE_ALGORITHM = "aes-256-gcm";
+
+  const SIGNAL = "signal";
+  const OPEN_SIGNAL = "open";
+  const USER_STATUS_PENDING = "pending";
+  const USER_STATUS_APPROVED = "approved";
+  const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
+  const MAX_CIRCLE_BANNER_BYTES = 900 * 1024;
+  const AFFILIATIONS = new Set(["Games", "동물원", "수녀원", "지인소개"]);
+  const TAG_OPTIONS = {
+    roles: [],
+    groups: ["Games", "동물원", "수녀원", "지인소개"],
+    seeking: ["연애만", "친분만", "아무나환영"]
+  };
+
+  const MIME_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".svg": "image/svg+xml; charset=utf-8",
+    ".ttf": "font/ttf",
+    ".ico": "image/x-icon"
+  };
+
+  const DEFAULT_ROOM_SETTINGS = {
+    signalLimit: 10,
+    openSignalLimit: 1,
+    revokeLimit: 3
+  };
+
+  const DEFAULT_STORE = {
+    settings: {
+      adminKeyHash: null
+    },
+    rooms: [createRoom("SYNC2026")],
+    updatedAt: new Date().toISOString()
+  };
+
+  class DatabaseMissingError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "DatabaseMissingError";
+      this.code = "DATABASE_MISSING";
+    }
+  }
+
+  class ConfigurationError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "ConfigurationError";
+      this.code = "CONFIGURATION_ERROR";
+    }
+  }
+
+  function createRoom(code, values = {}) {
+    return {
+      id: values.id || crypto.randomUUID(),
+      code,
+      settings: {
+        signalLimit: positiveInt(values.settings?.signalLimit, DEFAULT_ROOM_SETTINGS.signalLimit),
+        openSignalLimit: positiveInt(
+          values.settings?.openSignalLimit,
+          DEFAULT_ROOM_SETTINGS.openSignalLimit
+        ),
+        revokeLimit: positiveInt(values.settings?.revokeLimit, DEFAULT_ROOM_SETTINGS.revokeLimit)
+      },
+      users: Array.isArray(values.users) ? values.users : [],
+      likes: Array.isArray(values.likes) ? values.likes : [],
+      circles: normalizeCircleState(values.circles),
+      circleBanner: normalizeCircleBanner(values.circleBanner),
+      createdAt: values.createdAt || new Date().toISOString(),
+      updatedAt: values.updatedAt || new Date().toISOString()
+    };
+  }
+
+  function cleanText(value, maxLength) {
+    return String(value || "").trim().slice(0, maxLength);
+  }
+
+  function escapeHtml(value) {
+    return String(value || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function cleanHeaderText(value, maxLength) {
+    const text = String(value || "");
+    try {
+      return cleanText(decodeURIComponent(text), maxLength);
+    } catch {
+      return cleanText(text, maxLength);
+    }
+  }
+
+  function positiveInt(value, fallback) {
+    const number = Number.parseInt(value, 10);
+    if (!Number.isFinite(number) || number < 0) return fallback;
+    return number;
+  }
+
+  function normalizeNickname(value) {
+    return cleanText(value, 32).replace(/\s+/g, " ").toLowerCase();
+  }
+
+  function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+    const key = crypto.scryptSync(password, salt, 64).toString("hex");
+    return `${salt}:${key}`;
+  }
+
+  function verifyPassword(password, storedHash) {
+    const [salt, key] = String(storedHash || "").split(":");
+    if (!salt || !key) return false;
+    const candidate = crypto.scryptSync(password, salt, 64);
+    const stored = Buffer.from(key, "hex");
+    return stored.length === candidate.length && crypto.timingSafeEqual(stored, candidate);
+  }
+
+  function normalizeTagList(values, allowedValues) {
+    const allowed = new Set(allowedValues);
+    return Array.isArray(values)
+      ? [...new Set(values.map((value) => cleanText(value, 24)).filter((value) => allowed.has(value)))]
+      : [];
+  }
+
+  function normalizeTags(tags = {}, user = {}) {
+    const next = {
+      roles: normalizeTagList(tags.roles, TAG_OPTIONS.roles),
+      groups: normalizeTagList(tags.groups, TAG_OPTIONS.groups),
+      seeking: normalizeTagList(tags.seeking, TAG_OPTIONS.seeking)
+    };
+
+    if (!next.groups.length && AFFILIATIONS.has(user.affiliation)) {
+      next.groups = [user.affiliation];
+    }
+
+    return next;
+  }
+
+  function tagLabel(user) {
+    const tags = normalizeTags(user.tags, user);
+    const labels = [...tags.groups, ...tags.seeking];
+    return labels.length ? labels.join(" · ") : "태그 미선택";
+  }
+
+  function affiliationLabel(user) {
+    if (user.tags) return tagLabel(user);
+    if (AFFILIATIONS.has(user.affiliation)) return user.affiliation;
+    if (user.affiliationDetail) return user.affiliationDetail;
+    return "소속 미입력";
+  }
+
+  function normalizeUser(user) {
+    user.extraSignalLimit = positiveInt(user.extraSignalLimit, 0);
+    user.extraOpenSignalLimit = positiveInt(user.extraOpenSignalLimit, 0);
+    user.extraRevokeLimit = positiveInt(user.extraRevokeLimit, 0);
+    user.revokesUsed = positiveInt(user.revokesUsed, 0);
+    user.status = user.status === USER_STATUS_PENDING ? USER_STATUS_PENDING : USER_STATUS_APPROVED;
+    user.tags = normalizeTags(user.tags, user);
+    user.statusMessage = cleanText(user.statusMessage, 120);
+    user.affiliation = AFFILIATIONS.has(user.affiliation) ? user.affiliation : "";
+    user.affiliationDetail = cleanText(user.affiliationDetail, 80);
+    return user;
+  }
+
+  function normalizeLikes(likes) {
+    return Array.isArray(likes)
+      ? likes
+          .filter((like) => like && like.from && like.to)
+          .map((like) => ({
+            from: like.from,
+            to: like.to,
+            type: like.type === OPEN_SIGNAL ? OPEN_SIGNAL : SIGNAL,
+            note: cleanText(like.note, 240),
+            createdAt: like.createdAt || new Date().toISOString()
+          }))
+      : [];
+  }
+
+  function normalizeCircleGroup(group) {
+    return {
+      id: cleanText(group?.id, 80) || crypto.randomUUID(),
+      name: cleanText(group?.name, 40),
+      members: Array.isArray(group?.members)
+        ? [...new Set(group.members.map((id) => cleanText(id, 80)).filter(Boolean))]
+        : []
+    };
+  }
+
+  function normalizeCirclePlan(plan) {
+    if (!plan || typeof plan !== "object") return null;
+    const groups = Array.isArray(plan.groups) ? plan.groups.map(normalizeCircleGroup) : [];
+    const fixedGroups = Array.isArray(plan.fixedGroups)
+      ? plan.fixedGroups
+          .map((group) =>
+            Array.isArray(group)
+              ? [...new Set(group.map((id) => cleanText(id, 80)).filter(Boolean))]
+              : []
+          )
+          .filter((group) => group.length > 1)
+      : [];
+
+    return {
+      id: cleanText(plan.id, 80) || crypto.randomUUID(),
+      size: Math.max(1, positiveInt(plan.size, 4)),
+      groups,
+      fixedGroups,
+      createdAt: plan.createdAt || new Date().toISOString(),
+      confirmedAt: plan.confirmedAt || null
+    };
+  }
+
+  function normalizeCircleState(circles) {
+    return {
+      draft: normalizeCirclePlan(circles?.draft),
+      active: normalizeCirclePlan(circles?.active)
+    };
+  }
+
+  function normalizeCircleBanner(banner) {
+    if (!banner || typeof banner !== "object") return null;
+    const dataUrl = String(banner.dataUrl || "").trim();
+    if (!/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(dataUrl)) return null;
+    if (Buffer.byteLength(dataUrl, "utf8") > MAX_CIRCLE_BANNER_BYTES) return null;
+
+    return {
+      dataUrl,
+      name: cleanText(banner.name, 120),
+      updatedAt: banner.updatedAt || new Date().toISOString()
+    };
+  }
+
+  function normalizeRoom(room) {
+    const code = cleanText(room.code || room.eventCode, 80);
+    const next = createRoom(code || "SYNC2026", room);
+    next.settings = {
+      signalLimit: positiveInt(room.settings?.signalLimit, DEFAULT_ROOM_SETTINGS.signalLimit),
+      openSignalLimit: positiveInt(
+        room.settings?.openSignalLimit,
+        DEFAULT_ROOM_SETTINGS.openSignalLimit
+      ),
+      revokeLimit: positiveInt(room.settings?.revokeLimit, DEFAULT_ROOM_SETTINGS.revokeLimit)
+    };
+    next.users = Array.isArray(room.users) ? room.users.map(normalizeUser) : [];
+    next.likes = normalizeLikes(room.likes);
+    next.circles = normalizeCircleState(room.circles);
+    next.circleBanner = normalizeCircleBanner(room.circleBanner);
+    return next;
+  }
+
+  function resetRoomActivity(room) {
+    const resetAt = new Date().toISOString();
+    const removedLikesCount = room.likes.length;
+    const removedCircleCount =
+      (room.circles?.draft?.groups?.length || 0) + (room.circles?.active?.groups?.length || 0);
+
+    room.likes = [];
+    room.circles = normalizeCircleState();
+    room.users.forEach((user) => {
+      user.extraSignalLimit = 0;
+      user.extraOpenSignalLimit = 0;
+      user.extraRevokeLimit = 0;
+      user.revokesUsed = 0;
+    });
+    room.updatedAt = resetAt;
+
+    return {
+      resetAt,
+      usersCount: room.users.length,
+      removedLikesCount,
+      removedCircleCount
+    };
+  }
+
+  function normalizeStore(store) {
+    const next = store && typeof store === "object" ? store : {};
+    const adminKeyHash = next.settings?.adminKeyHash || null;
+
+    if (!Array.isArray(next.rooms)) {
+      next.rooms = [
+        normalizeRoom({
+          code: cleanText(next.eventCode || "SYNC2026", 80),
+          settings: {
+            signalLimit: next.settings?.signalLimit,
+            openSignalLimit: next.settings?.openSignalLimit
+          },
+          users: next.users,
+          likes: next.likes,
+          updatedAt: next.updatedAt
+        })
+      ];
+    } else {
+      next.rooms = next.rooms.map(normalizeRoom).filter((room) => room.code);
+    }
+
+    if (!next.rooms.length) {
+      next.rooms.push(createRoom("SYNC2026"));
+    }
+
+    next.settings = { adminKeyHash };
+    next.updatedAt = next.updatedAt || new Date().toISOString();
+    delete next.eventCode;
+    delete next.users;
+    delete next.likes;
+    return next;
+  }
+
+  let cachedDataKey = null;
+
+  function decodeConfiguredKey(value) {
+    const text = String(value || "").trim();
+    if (!text) return null;
+
+    if (/^[a-f0-9]{64}$/i.test(text)) {
+      return Buffer.from(text, "hex");
+    }
+
+    try {
+      const base64Key = Buffer.from(text, "base64");
+      if (base64Key.length === 32) return base64Key;
+    } catch {
+      // Fall through to passphrase hashing.
+    }
+
+    return crypto.createHash("sha256").update(text).digest();
+  }
+
+  async function dataKey() {
+    if (cachedDataKey) return cachedDataKey;
+
+    const configuredKey = decodeConfiguredKey(env.DATA_ENCRYPTION_KEY || env.DB_ENCRYPTION_KEY);
+    if (configuredKey) {
+      cachedDataKey = configuredKey;
+      return cachedDataKey;
+    }
+
+    if (storage || (USE_UPSTASH_STORE && IS_RENDER)) {
+      throw new ConfigurationError("DATA_ENCRYPTION_KEY가 필요합니다. 서버 환경변수에 고정 암호화 키를 추가해주세요.");
+    }
+
+    try {
+      const savedKey = await fs.readFile(DATA_KEY_PATH, "utf8");
+      cachedDataKey = decodeConfiguredKey(savedKey);
+      if (cachedDataKey) return cachedDataKey;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+
+    cachedDataKey = crypto.randomBytes(32);
+    await fs.mkdir(path.dirname(DATA_KEY_PATH), { recursive: true });
+    await fs.writeFile(DATA_KEY_PATH, cachedDataKey.toString("hex"), {
+      encoding: "utf8",
+      mode: 0o600
+    });
+    return cachedDataKey;
+  }
+
+  function isEncryptedDatabase(payload) {
+    return (
+      payload &&
+      payload.encrypted === true &&
+      payload.algorithm === DATABASE_ALGORITHM &&
+      payload.iv &&
+      payload.tag &&
+      payload.ciphertext
+    );
+  }
+
+  async function encryptStorePayload(store) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv(DATABASE_ALGORITHM, await dataKey(), iv);
+    const plaintext = JSON.stringify(normalizeStore(store));
+    const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    return {
+      version: 1,
+      encrypted: true,
+      algorithm: DATABASE_ALGORITHM,
+      iv: iv.toString("base64"),
+      tag: tag.toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  async function decryptStorePayload(payload) {
+    try {
+      const decipher = crypto.createDecipheriv(
+        DATABASE_ALGORITHM,
+        await dataKey(),
+        Buffer.from(payload.iv, "base64")
+      );
+      decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+      const plaintext = Buffer.concat([
+        decipher.update(Buffer.from(payload.ciphertext, "base64")),
+        decipher.final()
+      ]).toString("utf8");
+      return normalizeStore(JSON.parse(plaintext));
+    } catch (error) {
+      throw new Error("Encrypted database could not be opened. Check DATA_ENCRYPTION_KEY.");
+    }
+  }
+
+  async function readStorePayload(raw) {
+    const payload = JSON.parse(raw);
+    if (isEncryptedDatabase(payload)) {
+      return { store: await decryptStorePayload(payload), encrypted: true };
+    }
+    return { store: normalizeStore(payload), encrypted: false };
+  }
+
+  async function readStoreFile(filePath) {
+    return readStorePayload(await fs.readFile(filePath, "utf8"));
+  }
+
+  async function upstashCommand(command) {
+    const response = await fetch(UPSTASH_REDIS_REST_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${UPSTASH_REDIS_REST_TOKEN}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(command)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) {
+      throw new Error(data.error || `Upstash request failed with HTTP ${response.status}`);
+    }
+    return data.result;
+  }
+
+  async function readStoreFromUpstash() {
+    const raw = await upstashCommand(["GET", UPSTASH_STORE_KEY]);
+    if (raw === null || raw === undefined) {
+      const error = new Error("Upstash store key is missing.");
+      error.code = "ENOENT";
+      throw error;
+    }
+    return readStorePayload(raw);
+  }
+
+  async function writeStoreToUpstash(store) {
+    const encryptedPayload = await encryptStorePayload(store);
+    await upstashCommand(["SET", UPSTASH_STORE_KEY, JSON.stringify(encryptedPayload)]);
+  }
+
+  function backupStamp() {
+    return new Date().toISOString().replace(/[:.]/g, "-");
+  }
+
+  async function encryptedDatabaseExists(filePath) {
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      return isEncryptedDatabase(JSON.parse(raw));
+    } catch (error) {
+      if (error.code === "ENOENT") return false;
+      return false;
+    }
+  }
+
+  async function backupCurrentDatabase() {
+    if (!(await encryptedDatabaseExists(DATABASE_PATH))) return;
+
+    await fs.mkdir(DATABASE_BACKUP_DIR, { recursive: true });
+    const backupPath = path.join(DATABASE_BACKUP_DIR, `games-sync-${backupStamp()}.localdb`);
+    await fs.copyFile(DATABASE_PATH, backupPath);
+    await pruneDatabaseBackups();
+  }
+
+  async function databaseBackupPaths() {
+    try {
+      const entries = await fs.readdir(DATABASE_BACKUP_DIR, { withFileTypes: true });
+      const files = await Promise.all(
+        entries
+          .filter((entry) => entry.isFile() && entry.name.endsWith(".localdb"))
+          .map(async (entry) => {
+            const filePath = path.join(DATABASE_BACKUP_DIR, entry.name);
+            const stats = await fs.stat(filePath);
+            return { filePath, mtimeMs: stats.mtimeMs };
+          })
+      );
+      return files.sort((a, b) => b.mtimeMs - a.mtimeMs).map((entry) => entry.filePath);
+    } catch (error) {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  async function pruneDatabaseBackups() {
+    const backups = await databaseBackupPaths();
+    await Promise.all(backups.slice(MAX_DATABASE_BACKUPS).map((backupPath) => fs.rm(backupPath)));
+  }
+
+  async function readLatestDatabaseBackup() {
+    for (const backupPath of await databaseBackupPaths()) {
+      try {
+        return await readStoreFile(backupPath);
+      } catch (error) {
+        console.error(`Could not read database backup ${backupPath}:`, error.message);
+      }
+    }
+    return null;
+  }
+
+  function storeScore(store) {
+    return store.rooms.reduce(
+      (score, room) => score + 1 + room.users.length * 10 + room.likes.length,
+      0
+    );
+  }
+
+  function legacyStorePaths() {
+    return [
+      LEGACY_STORE_PATH,
+      env.STORE_PATH,
+      path.join(path.dirname(DATABASE_PATH), "store.json"),
+      path.join(__dirname, "data", "store.json")
+    ]
+      .filter(Boolean)
+      .map((entry) => path.resolve(entry))
+      .filter((entry, index, entries) => entry !== path.resolve(DATABASE_PATH) && entries.indexOf(entry) === index);
+  }
+
+  async function richerLegacyStore(currentStore) {
+    const currentScore = storeScore(currentStore);
+
+    for (const legacyPath of legacyStorePaths()) {
+      try {
+        const result = await readStoreFile(legacyPath);
+        if (storeScore(result.store) > currentScore) {
+          return result.store;
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+
+    return null;
+  }
+
+  async function readStore(options = {}) {
+    const allowBootstrap = options.allowBootstrap === true || ALLOW_DATABASE_BOOTSTRAP;
+
+    if (storage) {
+      const raw = await storage.read();
+      if (raw !== null) return (await readStorePayload(raw)).store;
+      if (!allowBootstrap) throw new DatabaseMissingError("Cloudflare storage is not initialized.");
+      const store = normalizeStore(DEFAULT_STORE);
+      await writeStore(store);
+      return store;
+    }
+
+    if (USE_UPSTASH_STORE) {
+      try {
+        const result = await readStoreFromUpstash();
+        if (!result.encrypted) {
+          await writeStore(result.store);
+        }
+        return result.store;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+
+    try {
+      const result = await readStoreFile(DATABASE_PATH);
+      if (!result.encrypted) {
+        await writeStore(result.store);
+      }
+      const legacyStore = await richerLegacyStore(result.store);
+      if (legacyStore) {
+        await writeStore(legacyStore);
+        return legacyStore;
+      }
+      return result.store;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+
+    const backup = await readLatestDatabaseBackup();
+    if (backup) {
+      await writeStore(backup.store, { backup: false });
+      return backup.store;
+    }
+
+    for (const legacyPath of legacyStorePaths()) {
+      try {
+        const result = await readStoreFile(legacyPath);
+        await writeStore(result.store);
+        return result.store;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+
+    if (!allowBootstrap) {
+      const missingTarget = USE_UPSTASH_STORE
+        ? `Upstash Redis key ${UPSTASH_STORE_KEY}`
+        : `database file at ${DATABASE_PATH}`;
+      throw new DatabaseMissingError(
+        `${missingTarget} is missing. Refusing to create a fresh empty database. ` +
+          "Restore a backup, use the Render ADMIN_KEY, or set ALLOW_DATABASE_BOOTSTRAP=true once for first setup."
+      );
+    }
+
+    const store = normalizeStore(DEFAULT_STORE);
+    await writeStore(store);
+    return store;
+  }
+
+  async function writeStore(store, options = {}) {
+    if (storage) {
+      await storage.write(JSON.stringify(await encryptStorePayload(store)));
+      return;
+    }
+    if (USE_UPSTASH_STORE) {
+      await writeStoreToUpstash(store);
+      return;
+    }
+
+    await fs.mkdir(path.dirname(DATABASE_PATH), { recursive: true });
+    if (options.backup !== false) {
+      await backupCurrentDatabase();
+    }
+    const encryptedPayload = await encryptStorePayload(store);
+    const tempPath = `${DATABASE_PATH}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(tempPath, JSON.stringify(encryptedPayload, null, 2), "utf8");
+    await fs.rename(tempPath, DATABASE_PATH);
+  }
+
+  function sendJson(res, status, payload) {
+    res.writeHead(status, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store"
+    });
+    res.end(JSON.stringify(payload));
+  }
+
+  function sendError(res, status, message) {
+    sendJson(res, status, { error: message });
+  }
+
+  function requestOrigin(req) {
+    const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+    const host = forwardedHost || req.headers.host || `localhost:${PORT}`;
+    const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+    const proto =
+      forwardedProto ||
+      (String(host).startsWith("localhost") || String(host).startsWith("127.") ? "http" : "https");
+    return `${proto}://${host}`;
+  }
+
+  function notificationAdminUrl(req) {
+    return `${requestOrigin(req)}/admin`;
+  }
+
+  function plainTextLine(value, fallback = "-") {
+    const text = cleanText(value, 240);
+    return text || fallback;
+  }
+
+  function pendingUserEmailPayload(req, room, user) {
+    const adminUrl = notificationAdminUrl(req);
+    const tags = affiliationLabel(user);
+    const subject = `[Games Sync] ${room.code} 방에 새 승인 요청이 있어요`;
+    const text = [
+      "Games Sync에 새 참가자 승인 요청이 도착했습니다.",
+      "",
+      `방 코드: ${room.code}`,
+      `닉네임: ${user.nickname}`,
+      `태그: ${tags}`,
+      `상태메시지: ${plainTextLine(user.statusMessage)}`,
+      "",
+      `관리자 페이지: ${adminUrl}`
+    ].join("\n");
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#14213d">
+        <h2 style="margin:0 0 12px;color:#0a1223">새 참가자 승인 요청</h2>
+        <p style="margin:0 0 16px">Games Sync에 새 참가자가 입장을 요청했습니다.</p>
+        <table style="border-collapse:collapse;width:100%;max-width:520px">
+          <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">방 코드</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(room.code)}</td></tr>
+          <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">닉네임</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(user.nickname)}</td></tr>
+          <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">태그</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(tags)}</td></tr>
+          <tr><th align="left" style="padding:8px;border-bottom:1px solid #e6eaf2">상태메시지</th><td style="padding:8px;border-bottom:1px solid #e6eaf2">${escapeHtml(plainTextLine(user.statusMessage))}</td></tr>
+        </table>
+        <p style="margin:18px 0 0">
+          <a href="${escapeHtml(adminUrl)}" style="display:inline-block;padding:11px 16px;border-radius:10px;background:#2b4c7e;color:#ffffff;text-decoration:none;font-weight:700">관리자 페이지 열기</a>
+        </p>
+      </div>
+    `;
+
+    return { subject, text, html };
+  }
+
+  async function sendPendingUserEmail(req, room, user) {
+    if (!RESEND_API_KEY || !ADMIN_NOTIFY_EMAIL) {
+      console.warn("Pending user email skipped: RESEND_API_KEY or ADMIN_NOTIFY_EMAIL is not configured.");
+      return;
+    }
+
+    const payload = pendingUserEmailPayload(req, room, user);
+    const response = await fetch("https://api.resend.com/emails", {
+      signal: AbortSignal.timeout(5000),
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${RESEND_API_KEY}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        from: NOTIFY_EMAIL_FROM,
+        to: [ADMIN_NOTIFY_EMAIL],
+        subject: payload.subject,
+        text: payload.text,
+        html: payload.html
+      })
+    });
+
+    if (!response.ok) {
+      const details = cleanText(await response.text().catch(() => ""), 500);
+      throw new Error(`Resend email failed with ${response.status}: ${details}`);
+    }
+  }
+
+  function renderHtml(html, req) {
+    return html.replaceAll("__APP_ORIGIN__", requestOrigin(req));
+  }
+
+  async function readBody(req) {
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of req) {
+      const buffer = Buffer.from(chunk);
+      bytes += buffer.length;
+      if (bytes > MAX_REQUEST_BODY_BYTES) {
+        const error = new Error("요청 본문이 너무 큽니다.");
+        error.status = 413;
+        throw error;
+      }
+      chunks.push(buffer);
+    }
+    if (!bytes) return {};
+    try {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
+      return body;
+    } catch {
+      const error = new Error("올바른 JSON 객체를 보내주세요.");
+      error.status = 400;
+      throw error;
+    }
+  }
+
+  function publicUser(user) {
+    return {
+      id: user.id,
+      nickname: user.nickname,
+      statusMessage: cleanText(user.statusMessage, 120),
+      affiliationLabel: affiliationLabel(user),
+      tags: normalizeTags(user.tags, user),
+      status: user.status,
+      createdAt: user.createdAt
+    };
+  }
+
+  function privateUser(user) {
+    return {
+      ...publicUser(user),
+      contact: user.contact
+    };
+  }
+
+  function roomSummary(room) {
+    return {
+      id: room.id,
+      code: room.code,
+      signalLimit: room.settings.signalLimit,
+      openSignalLimit: room.settings.openSignalLimit,
+      revokeLimit: room.settings.revokeLimit,
+      usersCount: room.users.length,
+      likesCount: room.likes.length,
+      updatedAt: room.updatedAt
+    };
+  }
+
+  function receivedSignalCount(room, userId) {
+    return new Set(
+      room.likes
+        .filter((like) => like.to === userId && (like.type === SIGNAL || like.type === OPEN_SIGNAL))
+        .map((like) => like.from)
+    ).size;
+  }
+
+  function rankingPayload(room) {
+    const rankedUsers = room.users
+      .filter(isApprovedUser)
+      .map((user) => ({
+        ...publicUser(user),
+        receivedCount: receivedSignalCount(room, user.id)
+      }))
+      .filter((user) => user.receivedCount > 0)
+      .sort((a, b) => b.receivedCount - a.receivedCount || a.nickname.localeCompare(b.nickname));
+
+    let rank = 0;
+    let previousCount = null;
+    return rankedUsers
+      .map((user) => {
+        if (user.receivedCount !== previousCount) {
+          rank += 1;
+          previousCount = user.receivedCount;
+        }
+        return {
+          ...user,
+          rank
+        };
+      })
+      .filter((user) => user.rank <= 3);
+  }
+
+  function adminUser(room, user) {
+    const stats = statsPayload(room, user.id);
+    return {
+      ...publicUser(user),
+      extraSignalLimit: user.extraSignalLimit,
+      extraOpenSignalLimit: user.extraOpenSignalLimit,
+      extraRevokeLimit: user.extraRevokeLimit,
+      revokesUsed: user.revokesUsed,
+      receivedCount: stats.receivedCount,
+      signalLimit: stats.signalLimit,
+      openSignalLimit: stats.openSignalLimit,
+      revokeLimit: stats.revokeLimit,
+      signalRemaining: stats.signalRemaining,
+      openSignalRemaining: stats.openSignalRemaining,
+      revokeRemaining: stats.revokeRemaining
+    };
+  }
+
+  function circleMemberPayload(room, userId) {
+    const user = room.users.find((entry) => entry.id === userId);
+    return user ? publicUser(user) : null;
+  }
+
+  function comparePublicUsersAsc(a, b) {
+    return a.nickname.localeCompare(b.nickname, "ko", { numeric: true, sensitivity: "base" });
+  }
+
+  function circlePlanPayload(room, plan) {
+    if (!plan) {
+      return null;
+    }
+
+    return {
+      id: plan.id,
+      size: plan.size,
+      createdAt: plan.createdAt,
+      confirmedAt: plan.confirmedAt,
+      fixedGroups: plan.fixedGroups,
+      groups: plan.groups.map((group, index) => ({
+        id: group.id,
+        name: group.name || `Circle ${index + 1}`,
+        members: group.members
+          .map((userId) => circleMemberPayload(room, userId))
+          .filter(Boolean)
+          .sort(comparePublicUsersAsc)
+      }))
+    };
+  }
+
+  function adminCirclesPayload(room) {
+    return {
+      banner: normalizeCircleBanner(room.circleBanner),
+      draft: circlePlanPayload(room, room.circles?.draft),
+      active: circlePlanPayload(room, room.circles?.active)
+    };
+  }
+
+  function circlePayload(room, userId) {
+    const active = circlePlanPayload(room, room.circles?.active);
+    if (!active) {
+      return { active: null, myCircle: null, banner: normalizeCircleBanner(room.circleBanner) };
+    }
+
+    return {
+      active,
+      myCircle: active.groups.find((group) => group.members.some((member) => member.id === userId)) || null,
+      banner: normalizeCircleBanner(room.circleBanner)
+    };
+  }
+
+  function shuffleItems(items) {
+    const next = [...items];
+    for (let index = next.length - 1; index > 0; index -= 1) {
+      const randomIndex = crypto.randomInt(index + 1);
+      [next[index], next[randomIndex]] = [next[randomIndex], next[index]];
+    }
+    return next;
+  }
+
+  function normalizeFixedGroups(rawGroups, approvedUserIds) {
+    const seen = new Set();
+    return (Array.isArray(rawGroups) ? rawGroups : [])
+      .map((group) =>
+        Array.isArray(group)
+          ? [...new Set(group.map((id) => cleanText(id, 80)).filter((id) => approvedUserIds.has(id)))]
+          : []
+      )
+      .filter((group) => group.length > 1)
+      .map((group) => {
+        const duplicated = group.find((id) => seen.has(id));
+        if (duplicated) {
+          throw new Error("같은 참가자를 여러 고정 그룹에 넣을 수 없습니다.");
+        }
+        group.forEach((id) => seen.add(id));
+        return group;
+      });
+  }
+
+  function buildCirclePlan(room, size, rawFixedGroups, mode = "auto") {
+    const approvedUsers = room.users.filter(isApprovedUser);
+    const approvedUserIds = new Set(approvedUsers.map((user) => user.id));
+    const circleSize = Math.max(1, positiveInt(size, 4));
+    const fixedGroups = normalizeFixedGroups(rawFixedGroups, approvedUserIds);
+    const tooLargeGroup = fixedGroups.find((group) => group.length > circleSize);
+
+    if (!approvedUsers.length) {
+      throw new Error("승인된 참가자가 있어야 Circle을 만들 수 있습니다.");
+    }
+    if (mode !== "manual" && tooLargeGroup) {
+      throw new Error(`고정 그룹 인원이 Circle 인원수 ${circleSize}명을 넘을 수 없습니다.`);
+    }
+
+    if (mode === "manual") {
+      if (!fixedGroups.length) {
+        throw new Error("묶어둔 멤버가 있어야 수동 Circle을 만들 수 있습니다.");
+      }
+
+      return {
+        id: crypto.randomUUID(),
+        size: Math.max(...fixedGroups.map((group) => group.length)),
+        fixedGroups,
+        groups: fixedGroups.map((group, index) => ({
+          id: crypto.randomUUID(),
+          name: `Circle ${index + 1}`,
+          members: [...group]
+        })),
+        createdAt: new Date().toISOString(),
+        confirmedAt: null
+      };
+    }
+
+    const fixedUserIds = new Set(fixedGroups.flat());
+    const soloGroups = approvedUsers.filter((user) => !fixedUserIds.has(user.id)).map((user) => [user.id]);
+    const units = shuffleItems([...fixedGroups, ...soloGroups]).sort((a, b) => b.length - a.length);
+    const groups = [];
+
+    units.forEach((unit) => {
+      const target = groups
+        .filter((group) => group.members.length + unit.length <= circleSize)
+        .sort((a, b) => b.members.length - a.members.length)[0];
+
+      if (target) {
+        target.members.push(...unit);
+        return;
+      }
+
+      groups.push({
+        id: crypto.randomUUID(),
+        name: `Circle ${groups.length + 1}`,
+        members: [...unit]
+      });
+    });
+
+    return {
+      id: crypto.randomUUID(),
+      size: circleSize,
+      fixedGroups,
+      groups,
+      createdAt: new Date().toISOString(),
+      confirmedAt: null
+    };
+  }
+
+  function removeUserFromCirclePlan(plan, userId) {
+    if (!plan) return null;
+    plan.fixedGroups = (plan.fixedGroups || [])
+      .map((group) => group.filter((id) => id !== userId))
+      .filter((group) => group.length > 1);
+    plan.groups = (plan.groups || [])
+      .map((group) => ({
+        ...group,
+        members: group.members.filter((id) => id !== userId)
+      }))
+      .filter((group) => group.members.length > 0);
+    return plan;
+  }
+
+  function removeUserFromRoom(room, userId) {
+    room.users = room.users.filter((user) => user.id !== userId);
+    room.likes = room.likes.filter((like) => like.from !== userId && like.to !== userId);
+    room.circles = normalizeCircleState(room.circles);
+    room.circles.draft = removeUserFromCirclePlan(room.circles.draft, userId);
+    room.circles.active = removeUserFromCirclePlan(room.circles.active, userId);
+  }
+
+  function isApprovedUser(user) {
+    return user && user.status === USER_STATUS_APPROVED;
+  }
+
+  function hasSignalBetween(room, from, to) {
+    return room.likes.some((like) => like.from === from && like.to === to);
+  }
+
+  function isMatchedPair(room, userId, targetId) {
+    return hasSignalBetween(room, userId, targetId) && hasSignalBetween(room, targetId, userId);
+  }
+
+  function hasSignalType(room, from, to, type) {
+    return room.likes.some((like) => like.from === from && like.to === to && like.type === type);
+  }
+
+  function matchTime(room, userId, matchedUserId) {
+    const timestamps = room.likes
+      .filter(
+        (like) =>
+          (like.from === userId && like.to === matchedUserId) ||
+          (like.from === matchedUserId && like.to === userId)
+      )
+      .map((like) => new Date(like.createdAt).getTime())
+      .filter((time) => Number.isFinite(time));
+
+    if (!timestamps.length) return new Date().toISOString();
+    return new Date(Math.max(...timestamps)).toISOString();
+  }
+
+  function matchOrder(room, userId, matchedUserId) {
+    return room.likes.reduce((latestOrder, like, index) => {
+      const isPairLike =
+        (like.from === userId && like.to === matchedUserId) ||
+        (like.from === matchedUserId && like.to === userId);
+      return isPairLike ? Math.max(latestOrder, index) : latestOrder;
+    }, -1);
+  }
+
+  function matchPayload(room, userId) {
+    const sentTo = new Set(room.likes.filter((like) => like.from === userId).map((like) => like.to));
+    const matchedUserIds = new Set();
+    return room.likes
+      .filter((like) => like.to === userId && sentTo.has(like.from))
+      .map((like) => room.users.find((user) => user.id === like.from))
+      .filter(Boolean)
+      .filter((user) => {
+        if (matchedUserIds.has(user.id)) return false;
+        matchedUserIds.add(user.id);
+        return true;
+      })
+      .map((user) => ({
+        id: user.id,
+        nickname: user.nickname,
+        statusMessage: cleanText(user.statusMessage, 120),
+        affiliationLabel: affiliationLabel(user),
+        contact: user.contact,
+        matchedAt: matchTime(room, userId, user.id),
+        order: matchOrder(room, userId, user.id)
+      }));
+  }
+
+  function effectiveSignalLimit(room, user) {
+    return room.settings.signalLimit + positiveInt(user.extraSignalLimit, 0);
+  }
+
+  function effectiveOpenSignalLimit(room, user) {
+    return room.settings.openSignalLimit + positiveInt(user.extraOpenSignalLimit, 0);
+  }
+
+  function effectiveRevokeLimit(room, user) {
+    return room.settings.revokeLimit + positiveInt(user.extraRevokeLimit, 0);
+  }
+
+  function statsPayload(room, userId) {
+    const user = room.users.find((entry) => entry.id === userId) || {};
+    const signalLimit = effectiveSignalLimit(room, user);
+    const openSignalLimit = effectiveOpenSignalLimit(room, user);
+    const revokeLimit = effectiveRevokeLimit(room, user);
+    const revokesUsed = positiveInt(user.revokesUsed, 0);
+    const sentSignalCount = room.likes.filter(
+      (like) => like.from === userId && like.type === SIGNAL
+    ).length;
+    const sentOpenSignalCount = room.likes.filter(
+      (like) => like.from === userId && like.type === OPEN_SIGNAL
+    ).length;
+    const receivedCount = receivedSignalCount(room, userId);
+    const receivedSignals = room.likes
+      .map((like, index) => ({ like, index }))
+      .filter((entry) => entry.like.to === userId && entry.like.type === SIGNAL)
+      .map((entry) => ({
+        sentAt: entry.like.createdAt,
+        order: entry.index
+      }));
+    const openSignals = room.likes
+      .map((like, index) => ({ like, index }))
+      .filter((entry) => entry.like.to === userId && entry.like.type === OPEN_SIGNAL)
+      .map((entry) => {
+        const sender = room.users.find((userEntry) => userEntry.id === entry.like.from);
+        if (!sender) return null;
+        return {
+          ...publicUser(sender),
+          contact: sender.contact,
+          note: entry.like.note,
+          sentAt: entry.like.createdAt,
+          order: entry.index
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      receivedCount,
+      sentSignalCount,
+      sentOpenSignalCount,
+      signalLimit,
+      openSignalLimit,
+      revokeLimit,
+      revokesUsed,
+      signalRemaining: Math.max(0, signalLimit - sentSignalCount),
+      openSignalRemaining: Math.max(0, openSignalLimit - sentOpenSignalCount),
+      revokeRemaining: Math.max(0, revokeLimit - revokesUsed),
+      receivedSignals,
+      openSignals
+    };
+  }
+
+  function parseTags(body) {
+    return normalizeTags(body.tags || {});
+  }
+
+  function findRoom(store, code) {
+    return store.rooms.find((room) => room.code === code);
+  }
+
+  async function requireRoom(req, res) {
+    let store;
+    try {
+      store = await readStore();
+    } catch (error) {
+      if (error instanceof DatabaseMissingError) {
+        sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. 관리자에게 문의해주세요.");
+        return null;
+      }
+      throw error;
+    }
+    const code = cleanHeaderText(req.headers["x-event-code"], 80);
+    const room = findRoom(store, code);
+    if (!room) {
+      sendError(res, 403, "입장 코드가 올바르지 않습니다.");
+      return null;
+    }
+    return { store, room };
+  }
+
+  async function requireAdmin(req, res) {
+    const key = cleanHeaderText(req.headers["x-admin-key"], 120);
+    const isEnvironmentKey = ADMIN_KEY && key === ADMIN_KEY;
+    let store;
+    try {
+      store = await readStore({
+        allowBootstrap: isEnvironmentKey && (Boolean(storage) || USE_UPSTASH_STORE || ALLOW_DATABASE_BOOTSTRAP)
+      });
+    } catch (error) {
+      if (error instanceof DatabaseMissingError) {
+        sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. 서버에 설정한 ADMIN_KEY로 다시 접속해주세요.");
+        return null;
+      }
+      throw error;
+    }
+    const isSavedKey = store.settings.adminKeyHash && verifyPassword(key, store.settings.adminKeyHash);
+    if (!isSavedKey && !isEnvironmentKey) {
+      sendError(res, 401, "관리자 코드가 올바르지 않습니다.");
+      return null;
+    }
+    return store;
+  }
+
+  function roomFromAdminRequest(store, code) {
+    return findRoom(store, cleanText(code, 80));
+  }
+
+  function storagePayload() {
+    return {
+      provider: storage ? "cloudflare-durable-object" : USE_UPSTASH_STORE ? "upstash" : "file",
+      databasePath: storage ? "durable-object:games-sync" : USE_UPSTASH_STORE ? `upstash:${UPSTASH_STORE_KEY}` : DATABASE_PATH,
+      dataKeyPath: HAS_CONFIGURED_DATA_KEY ? "environment secret" : DATA_KEY_PATH,
+      backupDir: storage ? "Cloudflare SQLite point-in-time recovery" : USE_UPSTASH_STORE ? "upstash managed storage" : DATABASE_BACKUP_DIR,
+      allowDatabaseBootstrap: ALLOW_DATABASE_BOOTSTRAP,
+      isRender: IS_RENDER
+    };
+  }
+
+  function storageDiagnosticsPayload() {
+    return {
+      provider: storage ? "cloudflare-durable-object" : USE_UPSTASH_STORE ? "upstash" : "file",
+      upstashConfigured: USE_UPSTASH_STORE,
+      hasUpstashUrl: Boolean(UPSTASH_REDIS_REST_URL),
+      hasUpstashToken: Boolean(UPSTASH_REDIS_REST_TOKEN),
+      storeKey: USE_UPSTASH_STORE ? UPSTASH_STORE_KEY : null,
+      hasDataEncryptionKey: HAS_CONFIGURED_DATA_KEY,
+      allowDatabaseBootstrap: ALLOW_DATABASE_BOOTSTRAP,
+      canAdminBootstrap: Boolean(storage) || USE_UPSTASH_STORE || ALLOW_DATABASE_BOOTSTRAP,
+      isRender: IS_RENDER
+    };
+  }
+
+  async function handleAdminStatus(req, res, url) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const code = cleanText(url.searchParams.get("roomCode"), 80);
+    const room = code ? roomFromAdminRequest(store, code) : store.rooms[0];
+    sendJson(res, 200, {
+      rooms: store.rooms.map(roomSummary),
+      room: room ? roomSummary(room) : null,
+      users: room ? room.users.map((user) => adminUser(room, user)) : [],
+      circles: room ? adminCirclesPayload(room) : { draft: null, active: null },
+      storage: storagePayload(),
+      updatedAt: store.updatedAt
+    });
+  }
+
+  async function handleCreateRoom(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const code = cleanText(body.code, 80);
+    if (code.length < 4) {
+      sendError(res, 400, "입장 코드는 4자 이상으로 설정해주세요.");
+      return;
+    }
+    if (findRoom(store, code)) {
+      sendError(res, 409, "이미 존재하는 입장 코드입니다.");
+      return;
+    }
+
+    const room = createRoom(code, {
+      settings: {
+        signalLimit: body.signalLimit,
+        openSignalLimit: body.openSignalLimit,
+        revokeLimit: body.revokeLimit
+      }
+    });
+    store.rooms.push(room);
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, { ok: true, room: roomSummary(room), rooms: store.rooms.map(roomSummary) });
+  }
+
+  async function handleDeleteRoom(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+    if (store.rooms.length <= 1) {
+      sendError(res, 400, "마지막 남은 룸은 삭제할 수 없습니다. 새 룸을 먼저 만든 뒤 삭제해주세요.");
+      return;
+    }
+
+    store.rooms = store.rooms.filter((entry) => entry.id !== room.id);
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+
+    const nextRoom = store.rooms[0];
+    sendJson(res, 200, {
+      ok: true,
+      deletedRoom: roomSummary(room),
+      room: roomSummary(nextRoom),
+      rooms: store.rooms.map(roomSummary),
+      users: nextRoom.users.map((user) => adminUser(nextRoom, user)),
+      circles: adminCirclesPayload(nextRoom)
+    });
+  }
+
+  async function handleResetRoomData(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+
+    const reset = resetRoomActivity(room);
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+
+    sendJson(res, 200, {
+      ok: true,
+      room: roomSummary(room),
+      rooms: store.rooms.map(roomSummary),
+      users: room.users.map((user) => adminUser(room, user)),
+      circles: adminCirclesPayload(room),
+      reset
+    });
+  }
+
+  async function handleAdminSettings(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+    const nextCode = cleanText(body.eventCode, 80);
+    const signalLimit = positiveInt(body.signalLimit, DEFAULT_ROOM_SETTINGS.signalLimit);
+    const openSignalLimit = positiveInt(body.openSignalLimit, DEFAULT_ROOM_SETTINGS.openSignalLimit);
+    const revokeLimit = positiveInt(body.revokeLimit, DEFAULT_ROOM_SETTINGS.revokeLimit);
+    const newAdminKey = cleanText(body.newAdminKey, 120);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+    if (nextCode.length < 4) {
+      sendError(res, 400, "입장 코드는 4자 이상으로 설정해주세요.");
+      return;
+    }
+    if (store.rooms.some((entry) => entry.code === nextCode && entry.id !== room.id)) {
+      sendError(res, 409, "이미 다른 룸에서 사용하는 입장 코드입니다.");
+      return;
+    }
+    if (body.newAdminKey !== undefined && newAdminKey.length > 0 && newAdminKey.length < 4) {
+      sendError(res, 400, "관리자 코드는 4자 이상으로 설정해주세요.");
+      return;
+    }
+
+    const codeChanged = room.code !== nextCode;
+    room.code = nextCode;
+    room.settings.signalLimit = signalLimit;
+    room.settings.openSignalLimit = openSignalLimit;
+    room.settings.revokeLimit = revokeLimit;
+    if (newAdminKey) {
+      store.settings.adminKeyHash = hashPassword(newAdminKey);
+    }
+    if (codeChanged) {
+      resetRoomActivity(room);
+    }
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, {
+      ok: true,
+      room: roomSummary(room),
+      rooms: store.rooms.map(roomSummary),
+      resetSignals: codeChanged,
+      adminKeyChanged: Boolean(newAdminKey)
+    });
+  }
+
+  async function handleGrant(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+    const userId = cleanText(body.userId, 80);
+    const addSignal = positiveInt(body.addSignal, 0);
+    const addOpenSignal = positiveInt(body.addOpenSignal, 0);
+    const addRevoke = positiveInt(body.addRevoke, 0);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+    const user = room.users.find((entry) => entry.id === userId);
+    if (!user) {
+      sendError(res, 404, "참가자를 찾을 수 없습니다.");
+      return;
+    }
+
+    user.extraSignalLimit += addSignal;
+    user.extraOpenSignalLimit += addOpenSignal;
+    user.extraRevokeLimit += addRevoke;
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, { ok: true, user: adminUser(room, user) });
+  }
+
+  async function handleCircleDraft(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+
+    try {
+      room.circles = normalizeCircleState(room.circles);
+      room.circles.draft = buildCirclePlan(room, body.size, body.fixedGroups, body.mode);
+      room.updatedAt = new Date().toISOString();
+      store.updatedAt = new Date().toISOString();
+      await writeStore(store);
+      sendJson(res, 200, { ok: true, circles: adminCirclesPayload(room) });
+    } catch (error) {
+      sendError(res, 400, error.message);
+    }
+  }
+
+  async function handleCircleBanner(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+
+    if (body.clear) {
+      room.circleBanner = null;
+    } else {
+      const banner = normalizeCircleBanner({
+        dataUrl: body.dataUrl,
+        name: body.name,
+        updatedAt: new Date().toISOString()
+      });
+      if (!banner) {
+        sendError(res, 400, "이미지는 900KB 이하의 PNG, JPG, WEBP 파일만 사용할 수 있습니다.");
+        return;
+      }
+      room.circleBanner = banner;
+    }
+
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, { ok: true, circles: adminCirclesPayload(room), room: roomSummary(room) });
+  }
+
+  async function handleCircleConfirm(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+
+    room.circles = normalizeCircleState(room.circles);
+    if (!room.circles.draft) {
+      sendError(res, 400, "먼저 Circle 미리보기를 만들어주세요.");
+      return;
+    }
+
+    room.circles.active = {
+      ...room.circles.draft,
+      confirmedAt: new Date().toISOString()
+    };
+    room.circles.draft = null;
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, { ok: true, circles: adminCirclesPayload(room) });
+  }
+
+  async function handleApproveUser(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+    const userId = cleanText(body.userId, 80);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+
+    const user = room.users.find((entry) => entry.id === userId);
+    if (!user) {
+      sendError(res, 404, "참가자를 찾을 수 없습니다.");
+      return;
+    }
+
+    user.status = USER_STATUS_APPROVED;
+    user.approvedAt = new Date().toISOString();
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, { ok: true, user: adminUser(room, user) });
+  }
+
+  async function handleRejectUser(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+    const userId = cleanText(body.userId, 80);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+
+    const user = room.users.find((entry) => entry.id === userId);
+    if (!user) {
+      sendError(res, 404, "참가자를 찾을 수 없습니다.");
+      return;
+    }
+    if (user.status !== USER_STATUS_PENDING) {
+      sendError(res, 400, "승인 대기 중인 참가자만 거절할 수 있습니다.");
+      return;
+    }
+
+    removeUserFromRoom(room, user.id);
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, {
+      ok: true,
+      rejectedUser: publicUser(user),
+      users: room.users.map((entry) => adminUser(room, entry)),
+      circles: adminCirclesPayload(room)
+    });
+  }
+
+  async function handleRemoveUser(req, res) {
+    const store = await requireAdmin(req, res);
+    if (!store) return;
+    const body = await readBody(req);
+    const room = roomFromAdminRequest(store, body.roomCode);
+    const userId = cleanText(body.userId, 80);
+
+    if (!room) {
+      sendError(res, 404, "룸을 찾을 수 없습니다.");
+      return;
+    }
+
+    const user = room.users.find((entry) => entry.id === userId);
+    if (!user) {
+      sendError(res, 404, "참가자를 찾을 수 없습니다.");
+      return;
+    }
+
+    removeUserFromRoom(room, user.id);
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    sendJson(res, 200, {
+      ok: true,
+      removedUser: publicUser(user),
+      users: room.users.map((entry) => adminUser(room, entry)),
+      circles: adminCirclesPayload(room)
+    });
+  }
+
+  async function handleSession(req, res, store, room) {
+    const body = await readBody(req);
+    const nickname = cleanText(body.nickname, 32).replace(/\s+/g, " ");
+    const statusMessage = cleanText(body.statusMessage, 120);
+    const contact = cleanText(body.contact, 80);
+    const password = cleanText(body.password, 120);
+    const normalized = normalizeNickname(nickname);
+    const tags = parseTags(body);
+    let isNewUser = false;
+
+    if (!nickname || !contact || password.length < 4) {
+      sendError(res, 400, "닉네임, 연락처, 4자 이상의 비밀번호를 입력해주세요.");
+      return;
+    }
+
+    let user = room.users.find((entry) => entry.normalizedNickname === normalized);
+    if (user) {
+      if (!verifyPassword(password, user.passwordHash)) {
+        sendError(res, 401, "이미 사용 중인 닉네임입니다. 비밀번호를 확인해주세요.");
+        return;
+      }
+      user.contact = contact;
+      user.statusMessage = statusMessage;
+      user.tags = tags;
+      user.affiliation = tags.groups[0] || "";
+      user.affiliationDetail = "";
+      user.lastSeenAt = new Date().toISOString();
+    } else {
+      isNewUser = true;
+      user = {
+        id: crypto.randomUUID(),
+        nickname,
+        normalizedNickname: normalized,
+        contact,
+        statusMessage,
+        tags,
+        affiliation: tags.groups[0] || "",
+        affiliationDetail: "",
+        extraSignalLimit: 0,
+        extraOpenSignalLimit: 0,
+        extraRevokeLimit: 0,
+        revokesUsed: 0,
+        status: USER_STATUS_PENDING,
+        passwordHash: hashPassword(password),
+        createdAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString()
+      };
+      room.users.push(user);
+    }
+
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+    if (isNewUser) {
+      await sendPendingUserEmail(req, room, user).catch((error) => {
+        console.error("Failed to send pending user email:", error);
+      });
+    }
+    if (!isApprovedUser(user)) {
+      sendJson(res, 200, {
+        pending: true,
+        user: privateUser(user),
+        room: roomSummary(room),
+        stats: null,
+        matches: [],
+        rankings: rankingPayload(room),
+        circles: { active: null, myCircle: null }
+      });
+      return;
+    }
+
+    sendJson(res, 200, {
+      user: privateUser(user),
+      room: roomSummary(room),
+      stats: statsPayload(room, user.id),
+      matches: matchPayload(room, user.id),
+      rankings: rankingPayload(room),
+      circles: circlePayload(room, user.id)
+    });
+  }
+
+  async function handleProfile(req, res, store, room) {
+    const userId = cleanText(req.headers["x-user-id"], 80);
+    const body = await readBody(req);
+    const user = room.users.find((entry) => entry.id === userId);
+    const contact = cleanText(body.contact, 80);
+    const statusMessage = cleanText(body.statusMessage, 120);
+    const tags = parseTags(body);
+
+    if (!user) {
+      sendError(res, 401, "다시 로그인해주세요.");
+      return;
+    }
+    if (!contact) {
+      sendError(res, 400, "연락처를 입력해주세요.");
+      return;
+    }
+
+    user.contact = contact;
+    user.statusMessage = statusMessage;
+    user.tags = tags;
+    user.affiliation = tags.groups[0] || "";
+    user.affiliationDetail = "";
+    user.lastSeenAt = new Date().toISOString();
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+
+    sendJson(res, 200, {
+      user: privateUser(user),
+      room: roomSummary(room),
+      stats: isApprovedUser(user) ? statsPayload(room, user.id) : null,
+      matches: isApprovedUser(user) ? matchPayload(room, user.id) : [],
+      rankings: rankingPayload(room),
+      circles: isApprovedUser(user) ? circlePayload(room, user.id) : { active: null, myCircle: null }
+    });
+  }
+
+  function peoplePayload(room, user) {
+    const matches = matchPayload(room, user.id);
+    const people = room.users
+      .filter((entry) => isApprovedUser(entry))
+      .map((entry) => {
+        const isSelf = entry.id === user.id;
+        const signalSent = !isSelf && hasSignalType(room, user.id, entry.id, SIGNAL);
+        const openSignalSent = !isSelf && hasSignalType(room, user.id, entry.id, OPEN_SIGNAL);
+        return {
+          ...publicUser(entry),
+          isSelf,
+          signalSent,
+          openSignalSent,
+          signaled: signalSent || openSignalSent,
+          synced: !isSelf && matches.some((match) => match.id === entry.id)
+        };
+      });
+
+    return {
+      user: privateUser(user),
+      room: roomSummary(room),
+      people,
+      stats: statsPayload(room, user.id),
+      matches,
+      rankings: rankingPayload(room),
+      circles: circlePayload(room, user.id)
+    };
+  }
+
+  async function handlePeople(req, res, room) {
+    const userId = cleanText(req.headers["x-user-id"], 80);
+    const user = room.users.find((entry) => entry.id === userId);
+    if (!user) {
+      sendError(res, 401, "다시 로그인해주세요.");
+      return;
+    }
+    if (!isApprovedUser(user)) {
+      sendError(res, 403, "관리자 승인을 받는중입니다.");
+      return;
+    }
+
+    sendJson(res, 200, peoplePayload(room, user));
+  }
+
+  async function handleLikes(req, res, store, room) {
+    const userId = cleanText(req.headers["x-user-id"], 80);
+    const body = await readBody(req);
+    const targetId = cleanText(body.targetId, 80);
+    const type = body.type === OPEN_SIGNAL ? OPEN_SIGNAL : SIGNAL;
+    const note = cleanText(body.note, 240);
+    const user = room.users.find((entry) => entry.id === userId);
+    const target = room.users.find((entry) => entry.id === targetId);
+
+    if (!user || !target || user.id === target.id) {
+      sendError(res, 400, "SIGNAL을 보낼 수 없습니다.");
+      return;
+    }
+    if (!isApprovedUser(user)) {
+      sendError(res, 403, "관리자 승인을 받는중입니다.");
+      return;
+    }
+    if (!isApprovedUser(target)) {
+      sendError(res, 400, "아직 승인되지 않은 참가자에게는 SIGNAL을 보낼 수 없습니다.");
+      return;
+    }
+    if (hasSignalType(room, user.id, target.id, type)) {
+      sendError(
+        res,
+        409,
+        type === OPEN_SIGNAL
+          ? "이미 이 닉네임에게 OPEN SIGNAL을 보냈습니다."
+          : "이미 이 닉네임에게 SIGNAL을 보냈습니다."
+      );
+      return;
+    }
+
+    const stats = statsPayload(room, user.id);
+    if (type === SIGNAL && stats.signalRemaining <= 0) {
+      sendError(res, 400, "보낼 수 있는 SIGNAL을 모두 사용했습니다.");
+      return;
+    }
+    if (type === OPEN_SIGNAL && stats.openSignalRemaining <= 0) {
+      sendError(res, 400, "보낼 수 있는 OPEN SIGNAL을 모두 사용했습니다.");
+      return;
+    }
+
+    room.likes.push({
+      from: user.id,
+      to: target.id,
+      type,
+      note: type === OPEN_SIGNAL ? note : "",
+      createdAt: new Date().toISOString()
+    });
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+
+    sendJson(res, 200, {
+      ok: true,
+      type,
+      synced: hasSignalBetween(room, target.id, user.id),
+      target: publicUser(target),
+      room: roomSummary(room),
+      stats: statsPayload(room, user.id),
+      matches: matchPayload(room, user.id),
+      circles: circlePayload(room, user.id)
+    });
+  }
+
+  async function handleRevokeLike(req, res, store, room) {
+    const userId = cleanText(req.headers["x-user-id"], 80);
+    const body = await readBody(req);
+    const targetId = cleanText(body.targetId, 80);
+    const user = room.users.find((entry) => entry.id === userId);
+    const target = room.users.find((entry) => entry.id === targetId);
+
+    if (!user || !target || user.id === target.id) {
+      sendError(res, 400, "SIGNAL을 회수할 수 없습니다.");
+      return;
+    }
+    if (!isApprovedUser(user)) {
+      sendError(res, 403, "관리자 승인을 받는중입니다.");
+      return;
+    }
+
+    if (isMatchedPair(room, user.id, target.id)) {
+      sendError(res, 400, "SYNC된 상대에게 보낸 SIGNAL은 회수할 수 없습니다.");
+      return;
+    }
+
+    const stats = statsPayload(room, user.id);
+    if (stats.revokeRemaining <= 0) {
+      sendError(res, 400, "사용 가능한 SIGNAL 회수권이 없습니다.");
+      return;
+    }
+
+    const likeIndex = room.likes.findIndex(
+      (like) => like.from === user.id && like.to === target.id && like.type === SIGNAL
+    );
+    if (likeIndex === -1) {
+      sendError(res, 404, "회수할 SIGNAL을 찾을 수 없습니다.");
+      return;
+    }
+
+    room.likes.splice(likeIndex, 1);
+    user.revokesUsed = positiveInt(user.revokesUsed, 0) + 1;
+    room.updatedAt = new Date().toISOString();
+    store.updatedAt = new Date().toISOString();
+    await writeStore(store);
+
+    sendJson(res, 200, {
+      ok: true,
+      target: publicUser(target),
+      room: roomSummary(room),
+      stats: statsPayload(room, user.id),
+      matches: matchPayload(room, user.id),
+      circles: circlePayload(room, user.id)
+    });
+  }
+
+  async function handleApi(req, res, url) {
+    if (req.method === "GET" && url.pathname === "/api/storage-info") {
+      sendJson(res, 200, storageDiagnosticsPayload());
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/check-code") {
+      const body = await readBody(req);
+      const code = cleanText(body.code, 80);
+      const store = await readStore();
+      const room = findRoom(store, code);
+      sendJson(res, room ? 200 : 403, {
+        ok: Boolean(room),
+        room: room ? roomSummary(room) : null,
+        message: room ? "입장 코드가 확인되었습니다." : "입장 코드가 올바르지 않습니다."
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/status") {
+      await handleAdminStatus(req, res, url);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/rooms") {
+      await handleCreateRoom(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/rooms/delete") {
+      await handleDeleteRoom(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/rooms/reset-data") {
+      await handleResetRoomData(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/settings") {
+      await handleAdminSettings(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/users/grant") {
+      await handleGrant(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/users/approve") {
+      await handleApproveUser(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/users/reject") {
+      await handleRejectUser(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/users/remove") {
+      await handleRemoveUser(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/circles/draft") {
+      await handleCircleDraft(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/circles/banner") {
+      await handleCircleBanner(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/circles/confirm") {
+      await handleCircleConfirm(req, res);
+      return;
+    }
+
+    const context = await requireRoom(req, res);
+    if (!context) return;
+    const { store, room } = context;
+
+    if (req.method === "POST" && url.pathname === "/api/session") {
+      await handleSession(req, res, store, room);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/profile") {
+      await handleProfile(req, res, store, room);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/people") {
+      await handlePeople(req, res, room);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/likes") {
+      await handleLikes(req, res, store, room);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/likes/revoke") {
+      await handleRevokeLike(req, res, store, room);
+      return;
+    }
+
+    sendError(res, 404, "API를 찾을 수 없습니다.");
+  }
+
+  async function serveStatic(req, res, url) {
+    const requestedPath =
+      url.pathname === "/" ? "/index.html" : url.pathname === "/admin" ? "/admin.html" : url.pathname;
+    const filePath = path.resolve(path.join(PUBLIC_DIR, requestedPath));
+    const publicRoot = path.resolve(PUBLIC_DIR);
+
+    if (!filePath.startsWith(publicRoot)) {
+      res.writeHead(403);
+      res.end("Forbidden");
+      return;
+    }
+
+    try {
+      const data = await fs.readFile(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      res.writeHead(200, {
+        "content-type": MIME_TYPES[ext] || "application/octet-stream",
+        "cache-control": "no-cache"
+      });
+      res.end(ext === ".html" ? renderHtml(data.toString("utf8"), req) : data);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        const data = await fs.readFile(path.join(PUBLIC_DIR, "index.html"), "utf8");
+        res.writeHead(200, {
+          "content-type": MIME_TYPES[".html"],
+          "cache-control": "no-cache"
+        });
+        res.end(renderHtml(data, req));
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async function handleRequest(req, res) {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      if (url.pathname.startsWith("/api/")) {
+        await handleApi(req, res, url);
+        return;
+      }
+      await serveStatic(req, res, url);
+    } catch (error) {
+      if (error.status === 400 || error.status === 413) {
+        sendError(res, error.status, error.message);
+        return;
+      }
+      console.error(error);
+      if (error instanceof DatabaseMissingError) {
+        sendError(res, 503, "데이터 저장소가 아직 준비되지 않았습니다. 관리자에게 문의해주세요.");
+        return;
+      }
+      if (error instanceof ConfigurationError) {
+        sendError(res, 503, error.message);
+        return;
+      }
+      sendError(res, 500, "서버 오류가 발생했습니다.");
+    }
+  }
+
+  return { handleRequest };
+}
+
+module.exports = { createApplication };
