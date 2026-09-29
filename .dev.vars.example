@@ -2,6 +2,9 @@
 ADMIN_KEY=replace-with-a-random-admin-key
 DATA_ENCRYPTION_KEY=replace-with-a-stable-random-encryption-key
 
+# Google Apps Script approval notifications (64 lowercase hexadecimal characters).
+# SIGNUP_ALERT_TOKEN=
+
 # Optional signup notification emails; omit to run without email.
 # RESEND_API_KEY=
 # ADMIN_NOTIFY_EMAIL=

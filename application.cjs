@@ -26,6 +26,8 @@ function createApplication({ env = process.env, storage = null } = {}) {
   const ADMIN_NOTIFY_EMAIL = cleanText(env.ADMIN_NOTIFY_EMAIL || "ahdcj1234@naver.com", 180);
   const NOTIFY_EMAIL_FROM = cleanText(env.NOTIFY_EMAIL_FROM || "Games Sync <onboarding@resend.dev>", 180);
   const RESEND_API_KEY = cleanText(env.RESEND_API_KEY, 500);
+  const SIGNUP_ALERT_TOKEN = String(env.SIGNUP_ALERT_TOKEN || "");
+  let signupAlertWindow = { startedAt: 0, count: 0 };
   const PUBLIC_DIR = storage ? "" : path.join(__dirname, "public");
   const DATABASE_ALGORITHM = "aes-256-gcm";
 
@@ -1869,7 +1871,44 @@ function createApplication({ env = process.env, storage = null } = {}) {
     });
   }
 
+  async function handleSignupAlerts(req, res) {
+    if (req.method !== "GET") {
+      sendError(res, 405, "GET 요청만 사용할 수 있습니다.");
+      return;
+    }
+    if (!/^[a-f0-9]{64}$/.test(SIGNUP_ALERT_TOKEN)) {
+      sendError(res, 503, "승인 알림 연결이 설정되지 않았습니다.");
+      return;
+    }
+    const provided = String(req.headers.authorization || "").match(/^Bearer ([a-f0-9]{64})$/)?.[1];
+    if (!provided || !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(SIGNUP_ALERT_TOKEN))) {
+      sendError(res, 401, "승인 알림 인증을 확인해주세요.");
+      return;
+    }
+    const now = Date.now();
+    if (now - signupAlertWindow.startedAt >= 60000) signupAlertWindow = { startedAt: now, count: 0 };
+    if (++signupAlertWindow.count > 12) {
+      sendError(res, 429, "잠시 후 다시 확인해주세요.");
+      return;
+    }
+    const store = await readStore();
+    const pending = store.rooms.flatMap((room) => room.users
+      .filter((user) => user.status === USER_STATUS_PENDING)
+      .map((user) => ({
+        id: user.id,
+        roomCode: room.code,
+        nickname: user.nickname,
+        createdAt: Date.parse(user.createdAt)
+      })))
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    sendJson(res, 200, { pending });
+  }
+
   async function handleApi(req, res, url) {
+    if (url.pathname === "/api/notifications/signups") {
+      await handleSignupAlerts(req, res);
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/api/storage-info") {
       sendJson(res, 200, storageDiagnosticsPayload());
       return;

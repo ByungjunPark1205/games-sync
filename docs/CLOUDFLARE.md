@@ -56,7 +56,15 @@ corepack pnpm exec wrangler secret put DATA_ENCRYPTION_KEY
 
 ## 이메일 알림
 
-현재 이메일 알림은 설정하지 않았습니다. 관리자 화면에서 직접 승인할 수 있습니다. 이메일이 필요하면 `RESEND_API_KEY`, `ADMIN_NOTIFY_EMAIL`, `NOTIFY_EMAIL_FROM`을 Worker에 설정하세요. Resend에서 허용한 발신 주소를 사용해야 합니다.
+승인 요청 알림은 호감핑과 같은 Google Apps Script 방식으로 연결돼 있습니다. 기존 비공개 `칭찬핑` 프로젝트에 `Sync.gs`와 `pollSyncSignupAlerts` 트리거를 추가했습니다. 15분 간격으로 모든 방의 승인 대기자를 확인하고, 신규 요청의 방 코드·닉네임·신청 시각과 관리자 링크를 한 통에 모아 보냅니다. 확인 전에 승인 또는 삭제된 요청은 제외합니다. 같은 요청은 반복 발송하지 않으며 메일 실패나 일일 한도 소진 시 다음 실행에서 재시도합니다.
+
+Worker의 `SIGNUP_ALERT_TOKEN`과 Apps Script 속성의 같은 이름에 동일한 64자리 소문자 hex 값을 설정합니다. 토큰은 승인 대기 목록만 조회하며 승인, 연락처, SIGNAL 내역에 접근할 수 없습니다. Wrangler의 `keep_vars` 설정으로 대시보드에서 등록한 변수를 재배포 때 보존합니다.
+
+기존 비공개 승인 알림 Apps Script 프로젝트에 `integrations/google-apps-script/sync-signup-alerts.gs`를 **새 파일 `Sync.gs`**로 추가합니다. 기존 `ALERT_TO` 수신 주소와 `SIGNUP_ALERT_TOKEN`을 재사용합니다. SYNC만 다른 토큰을 쓰면 `SYNC_SIGNUP_ALERT_TOKEN` 속성에 그 값을 설정합니다. `installSyncSignupAlerts`를 한 번 실행해 `pollSyncSignupAlerts` 15분 트리거를 설치하고, `testSyncSignupAlerts`로 테스트 메일을 보낼 수 있습니다. 기존 호감핑 코드와 알림 기록은 유지됩니다.
+
+구글의 실제 트리거 실행 및 메일 전달이 지연될 수 있습니다. 연결 직후 현재 승인 대기 중인 참가자도 알림 대상이며, 메일 발송 직후 속성 저장에 실패한 경우 다음 실행에서 중복 발송될 수 있습니다. 수신함 읽기 권한이나 웹 앱 공개 배포는 필요하지 않습니다. 연결 해제 시 SYNC의 `pollSyncSignupAlerts` 트리거만 제거합니다.
+
+기존 Resend 발송 방식도 `RESEND_API_KEY`, `ADMIN_NOTIFY_EMAIL`, `NOTIFY_EMAIL_FROM` 설정 시 동작합니다. Google 알림과 함께 켜면 같은 요청이 두 방식으로 발송되므로 한 가지 방식만 사용하세요.
 
 ## 운영 범위
 

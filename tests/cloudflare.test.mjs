@@ -9,6 +9,7 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
 const adminKey = randomBytes(24).toString("hex");
 const encryptionKey = randomBytes(32).toString("hex");
+const alertToken = randomBytes(32).toString("hex");
 
 test("Cloudflare runtime: routes, authentication, matching, concurrency and persistence", async (t) => {
   const persist = await mkdtemp(path.join(tmpdir(), "games-sync-test-"));
@@ -20,7 +21,7 @@ test("Cloudflare runtime: routes, authentication, matching, concurrency and pers
     compatibilityFlags: config.compatibility_flags,
     durableObjects: { GAME_STORE: { className: "GameStore", useSQLite: true } },
     resourcePersistencePath: persist,
-    bindings: { ADMIN_KEY: adminKey, DATA_ENCRYPTION_KEY: encryptionKey, ALLOW_DATABASE_BOOTSTRAP: "false" },
+    bindings: { ADMIN_KEY: adminKey, DATA_ENCRYPTION_KEY: encryptionKey, ALLOW_DATABASE_BOOTSTRAP: "false", SIGNUP_ALERT_TOKEN: alertToken },
     assets: {
       directory: "public", binding: "ASSETS", run_worker_first: config.assets.run_worker_first,
       routerConfig: { has_user_worker: true }, assetConfig: { html_handling: "none" }
@@ -88,6 +89,28 @@ test("Cloudflare runtime: routes, authentication, matching, concurrency and pers
     assert.equal((await api("/api/likes", { userId: alice.id, body: { targetId: bob.id, type: "signal" } })).status, 403);
   });
 
+  await t.test("approval alerts require their own token and expose only pending metadata", async () => {
+    const route = "/api/notifications/signups";
+    for (const value of [undefined, `Bearer ${adminKey}`, `Bearer ${"0".repeat(64)}`, "Bearer short"]) {
+      const response = await request(route, { headers: value ? { authorization: value } : {} });
+      assert.equal(response.status, 401);
+    }
+    assert.equal((await request(route, { method: "POST", headers: { authorization: `Bearer ${alertToken}` } })).status, 405);
+    const before = (await api("/api/admin/status", { admin: true })).data.updatedAt;
+    const response = await request(route, { headers: { authorization: `Bearer ${alertToken}` } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const payload = await response.json();
+    assert.equal(payload.pending.length, 8);
+    for (const item of payload.pending) {
+      assert.deepEqual(Object.keys(item).sort(), ["createdAt", "id", "nickname", "roomCode"]);
+      assert.equal(item.roomCode, "SYNC2026");
+      assert.ok(Number.isFinite(item.createdAt));
+    }
+    assert.equal((await api("/api/admin/status", { admin: true })).data.updatedAt, before);
+    assert.equal((await request("/api/admin/status", { headers: { authorization: `Bearer ${alertToken}` } })).status, 401);
+  });
+
   await t.test("approval and simultaneous mutual SIGNAL create SYNC", async () => {
     for (const user of [alice, bob]) {
       assert.equal((await api("/api/admin/users/approve", { admin: true, body: { roomCode: "SYNC2026", userId: user.id } })).status, 200);
@@ -100,6 +123,8 @@ test("Cloudflare runtime: routes, authentication, matching, concurrency and pers
     const people = await api("/api/people", { userId: alice.id });
     assert.equal(people.data.matches.length, 1);
     assert.equal((await api("/api/likes", { userId: alice.id, body: { targetId: bob.id, type: "signal" } })).status, 409);
+    const alerts = await request("/api/notifications/signups", { headers: { authorization: `Bearer ${alertToken}` } });
+    assert.equal((await alerts.json()).pending.length, 6, "approved users must leave the alert list");
   });
 
   await t.test("malformed and oversized bodies have client error responses", async () => {
@@ -130,5 +155,12 @@ test("Cloudflare runtime: routes, authentication, matching, concurrency and pers
     await mf.dispose();
     mf = new Miniflare(convertV4MiniflareOptions({ ...options, bindings: {} }));
     assert.equal((await api("/api/admin/status", { admin: true })).status, 503);
+  });
+
+  await t.test("missing alert token disables only alerts", async () => {
+    await mf.dispose();
+    mf = new Miniflare(convertV4MiniflareOptions({ ...options, bindings: { ...options.bindings, SIGNUP_ALERT_TOKEN: "" } }));
+    assert.equal((await request("/api/notifications/signups", { headers: { authorization: `Bearer ${alertToken}` } })).status, 503);
+    assert.equal((await api("/api/admin/status", { admin: true })).status, 200);
   });
 });
