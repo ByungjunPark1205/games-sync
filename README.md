@@ -4,7 +4,10 @@
 
 이 프로젝트는 개인 토이프로젝트로 시작했지만, 실제 이벤트 운영을 가정해 입장코드 기반 룸, 관리자 승인, 데이터 영속성, 암호화 저장, 배포 환경 문제까지 직접 설계하고 개선했습니다.
 
-- Live Demo: https://games-sync.onrender.com/
+- Cloudflare: https://games-sync.emile941205.workers.dev/
+- Cloudflare 관리자: https://games-sync.emile941205.workers.dev/admin
+- Cloudflare 배포 및 운영: [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md)
+- 기존 Render Demo: https://games-sync.onrender.com/
 - Repository: https://github.com/ByungjunPark1205/games-sync
 
 ## Project Summary
@@ -31,7 +34,7 @@
 - Backend: Node.js HTTP Server
 - Storage: Upstash Redis, encrypted JSON payload
 - Security: AES-256-GCM encryption, salted password hashing
-- Deploy: Render
+- Deploy: Cloudflare Workers + Durable Objects (새 서비스), Render (기존 서비스)
 
 ## What I Focused On
 
